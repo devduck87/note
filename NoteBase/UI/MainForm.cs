@@ -37,6 +37,7 @@ namespace NoteBase.UI
         private Timer _hoverShowTimer;
         private Timer _hoverHideTimer;
         private string _hoveredNoteId;
+        private string _hoveredAnchor;
         private const int HoverShowDelayMs = 500;
         private const int HoverHideDelayMs = 250;
 
@@ -435,6 +436,7 @@ namespace NoteBase.UI
             {
                 _editMode = false;
                 UpdateToolStripState();
+                LoadNote(prevId);
                 foreach (ListViewItem item in lvNotes.Items)
                 {
                     if ((string)item.Tag == prevId)
@@ -444,7 +446,6 @@ namespace NoteBase.UI
                         break;
                     }
                 }
-                LoadNote(prevId);
             }
             finally
             {
@@ -728,7 +729,10 @@ namespace NoteBase.UI
             _editMode = false;
             _pendingAnchor = string.IsNullOrEmpty(anchor) ? null : anchor;
             UpdateToolStripState();
-            // 一覧の選択も同期
+            // LoadNote を先に呼んで _currentNoteId を更新する。
+            // その後で一覧の選択を同期すると、SelectedIndexChanged は newId == _currentNoteId で抜けるため
+            // 二重ロードによる _pendingAnchor の消失を防げる。
+            LoadNote(id);
             foreach (ListViewItem item in lvNotes.Items)
             {
                 if ((string)item.Tag == id)
@@ -738,7 +742,6 @@ namespace NoteBase.UI
                     break;
                 }
             }
-            LoadNote(id);
         }
 
         private void ScrollToAnchor(string anchor)
@@ -796,17 +799,19 @@ namespace NoteBase.UI
             {
                 var href = elem.GetAttribute("href");
                 var id = ExtractNoteIdFromHref(href);
+                var anchor = ExtractAnchorFromHref(href);
                 if (!string.IsNullOrEmpty(id) && id != _currentNoteId)
                 {
                     // 自ノート以外のノートリンク上をホバー中
                     _hoverHideTimer.Stop();
-                    if (id != _hoveredNoteId)
+                    if (id != _hoveredNoteId || anchor != _hoveredAnchor)
                     {
                         _hoveredNoteId = id;
+                        _hoveredAnchor = anchor;
                         if (_hoverPopup.Visible)
                         {
                             // 既に表示中なら即座に内容を差し替える
-                            ShowHoverPopupFor(id);
+                            ShowHoverPopupFor(id, anchor);
                         }
                         else
                         {
@@ -821,6 +826,7 @@ namespace NoteBase.UI
             // ノートリンク上ではない
             _hoverShowTimer.Stop();
             _hoveredNoteId = null;
+            _hoveredAnchor = null;
             if (_hoverPopup.Visible)
             {
                 _hoverHideTimer.Stop();
@@ -832,7 +838,7 @@ namespace NoteBase.UI
         {
             _hoverShowTimer.Stop();
             if (string.IsNullOrEmpty(_hoveredNoteId)) return;
-            ShowHoverPopupFor(_hoveredNoteId);
+            ShowHoverPopupFor(_hoveredNoteId, _hoveredAnchor);
         }
 
         private void HoverHideTimer_Tick(object sender, EventArgs e)
@@ -848,7 +854,7 @@ namespace NoteBase.UI
             _hoverPopup.Hide();
         }
 
-        private void ShowHoverPopupFor(string id)
+        private void ShowHoverPopupFor(string id, string anchor)
         {
             if (!Directory.Exists(_paths.NoteDir(id))) return;
 
@@ -859,7 +865,7 @@ namespace NoteBase.UI
                 var noteDir = _paths.NoteDir(id);
                 var baseUrl = "file:///" + noteDir.Replace('\\', '/').TrimEnd('/') + "/";
                 var html = MarkdownToHtml.Convert(body, ResolveTitleToId, baseUrl, ResolveNoteSummary);
-                _hoverPopup.SetContent(id, html);
+                _hoverPopup.SetContent(id, html, anchor);
 
                 if (!_hoverPopup.Visible)
                 {
@@ -888,11 +894,21 @@ namespace NoteBase.UI
             var lower = href.ToLowerInvariant();
             var idx = lower.LastIndexOf("/index.md");
             if (idx < 0) return null;
-            // /index.md の手前のセグメントを取得
             var head = href.Substring(0, idx);
             var slash = head.LastIndexOf('/');
             if (slash < 0) return null;
             return head.Substring(slash + 1);
+        }
+
+        private static string ExtractAnchorFromHref(string href)
+        {
+            if (string.IsNullOrEmpty(href)) return null;
+            var idx = href.IndexOf('#');
+            if (idx < 0) return null;
+            var anchor = href.Substring(idx + 1);
+            if (string.IsNullOrEmpty(anchor)) return null;
+            try { return Uri.UnescapeDataString(anchor); }
+            catch { return anchor; }
         }
     }
 }

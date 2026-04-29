@@ -15,13 +15,14 @@ namespace NoteBase.UI
         private static readonly UTF8Encoding Utf8NoBom = new UTF8Encoding(false);
         private readonly string _tempHtmlPath;
         private string _currentNoteId;
+        private string _pendingAnchor;
 
         public NotePreviewPopup()
         {
             InitializeComponent();
             _tempHtmlPath = Path.Combine(Path.GetTempPath(), "notebase_hover_preview.html");
-            // ホバープレビュー内のリンククリックでウィンドウ自体が遷移しないようにブロック
             webContent.Navigating += WebContent_Navigating;
+            webContent.DocumentCompleted += WebContent_DocumentCompleted;
         }
 
         // フォーカスを奪わずに表示する
@@ -44,10 +45,12 @@ namespace NoteBase.UI
 
         /// <summary>
         /// ポップアップに表示する HTML を更新する。
+        /// anchor が指定されていればドキュメント読込完了後に該当要素までスクロールする。
         /// </summary>
-        public void SetContent(string noteId, string innerHtml)
+        public void SetContent(string noteId, string innerHtml, string anchor = null)
         {
             _currentNoteId = noteId;
+            _pendingAnchor = string.IsNullOrEmpty(anchor) ? null : anchor;
 
             var doc = "<!DOCTYPE html><html><head>"
                 + "<meta charset=\"utf-8\"/>"
@@ -75,6 +78,25 @@ namespace NoteBase.UI
         public string CurrentNoteId
         {
             get { return _currentNoteId; }
+        }
+
+        private void WebContent_DocumentCompleted(object sender, WebBrowserDocumentCompletedEventArgs e)
+        {
+            if (string.IsNullOrEmpty(_pendingAnchor)) return;
+            var anchor = _pendingAnchor;
+            _pendingAnchor = null;
+            try
+            {
+                if (webContent.Document != null)
+                {
+                    var elem = webContent.Document.GetElementById(anchor);
+                    if (elem != null) elem.ScrollIntoView(true);
+                }
+            }
+            catch
+            {
+                // スクロール失敗は無視
+            }
         }
 
         private void WebContent_Navigating(object sender, WebBrowserNavigatingEventArgs e)

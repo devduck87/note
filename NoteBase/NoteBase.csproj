@@ -51,6 +51,7 @@
     <Compile Include="Core\NoteStatus.cs" />
     <Compile Include="Core\NoteType.cs" />
     <Compile Include="Core\Schedule.cs" />
+    <Compile Include="Markdown\MarkdownIndex.cs" />
     <Compile Include="Markdown\MarkdownSummary.cs" />
     <Compile Include="Markdown\MarkdownToHtml.cs" />
     <Compile Include="Storage\AppPaths.cs" />
@@ -79,6 +80,12 @@
     </Compile>
     <Compile Include="UI\NotePickerDialog.Designer.cs">
       <DependentUpon>NotePickerDialog.cs</DependentUpon>
+    </Compile>
+    <Compile Include="UI\NotePreviewPopup.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="UI\NotePreviewPopup.Designer.cs">
+      <DependentUpon>NotePreviewPopup.cs</DependentUpon>
     </Compile>
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

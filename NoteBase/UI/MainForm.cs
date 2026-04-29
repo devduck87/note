@@ -32,6 +32,17 @@ namespace NoteBase.UI
         private readonly Stack<string> _navHistory = new Stack<string>();
         private bool _navigatingBack;
 
+        // ホバープレビュー
+        private NotePreviewPopup _hoverPopup;
+        private Timer _hoverShowTimer;
+        private Timer _hoverHideTimer;
+        private string _hoveredNoteId;
+        private const int HoverShowDelayMs = 500;
+        private const int HoverHideDelayMs = 250;
+
+        // 別ノート遷移後に該当アンカー位置までスクロールするための保留 ID
+        private string _pendingAnchor;
+
         public MainForm()
         {
             InitializeComponent();
@@ -43,8 +54,19 @@ namespace NoteBase.UI
             _previewTempPath = Path.Combine(Path.GetTempPath(), "notebase_preview.html");
 
             InitPropertyControls();
+            InitHoverPopup();
 
             webPreview.Navigating += WebPreview_Navigating;
+            webPreview.DocumentCompleted += WebPreview_DocumentCompleted;
+        }
+
+        private void InitHoverPopup()
+        {
+            _hoverPopup = new NotePreviewPopup();
+            _hoverShowTimer = new Timer { Interval = HoverShowDelayMs };
+            _hoverShowTimer.Tick += HoverShowTimer_Tick;
+            _hoverHideTimer = new Timer { Interval = HoverHideDelayMs };
+            _hoverHideTimer.Tick += HoverHideTimer_Tick;
         }
 
         private void InitPropertyControls()
@@ -605,8 +627,8 @@ namespace NoteBase.UI
             {
                 if (picker.ShowDialog(this) == DialogResult.OK && picker.SelectedMeta != null)
                 {
-                    var m = picker.SelectedMeta;
-                    var snippet = "[" + (m.Title ?? "") + "](../" + m.Id + "/index.md)";
+                    var snippet = BuildNoteLinkSnippet(picker.SelectedMeta,
+                        picker.SelectedAnchor, picker.SelectedHeadingText);
                     int pos = txtBody.SelectionStart;
                     txtBody.Text = txtBody.Text.Insert(pos, snippet);
                     txtBody.SelectionStart = pos + snippet.Length;
@@ -614,6 +636,15 @@ namespace NoteBase.UI
                     txtBody.Focus();
                 }
             }
+        }
+
+        private static string BuildNoteLinkSnippet(NoteMeta m, string anchor, string headingText)
+        {
+            var title = m.Title ?? "";
+            if (string.IsNullOrEmpty(anchor))
+                return "[" + title + "](../" + m.Id + "/index.md)";
+            var display = title + " > " + (headingText ?? anchor);
+            return "[" + display + "](../" + m.Id + "/index.md#" + anchor + ")";
         }
 
         // ============================================================
@@ -635,6 +666,12 @@ namespace NoteBase.UI
             if (uri.IsFile)
             {
                 var path = uri.LocalPath;
+                // 念のため: 万一 path 内に '#' が混入していたら除去
+                if (path != null)
+                {
+                    var hashIdx = path.IndexOf('#');
+                    if (hashIdx >= 0) path = path.Substring(0, hashIdx);
+                }
                 // .md なら他ノートに遷移
                 if (path != null && path.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
                 {
@@ -643,8 +680,14 @@ namespace NoteBase.UI
                     if (!string.IsNullOrEmpty(dir))
                     {
                         var id = Path.GetFileName(dir);
-                        // UI スレッドへ非同期投入 (Navigating ハンドラ内で再ナビゲーションすると詰まる)
-                        BeginInvoke((Action)(() => OpenNoteFromLink(id)));
+                        var anchor = uri.Fragment ?? "";
+                        if (anchor.StartsWith("#")) anchor = anchor.Substring(1);
+                        if (!string.IsNullOrEmpty(anchor))
+                        {
+                            try { anchor = Uri.UnescapeDataString(anchor); }
+                            catch { /* デコード失敗は raw のまま */ }
+                        }
+                        BeginInvoke((Action)(() => OpenNoteFromLink(id, anchor)));
                     }
                     return;
                 }
@@ -663,7 +706,7 @@ namespace NoteBase.UI
             e.Cancel = true;
         }
 
-        private void OpenNoteFromLink(string id)
+        private void OpenNoteFromLink(string id, string anchor)
         {
             if (string.IsNullOrEmpty(id)) return;
             // 該当ノートが存在するか確認
@@ -673,8 +716,17 @@ namespace NoteBase.UI
                     "情報", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
+
+            // 同じノート内のアンカーリンクは現在のドキュメントでスクロールするだけ
+            if (id == _currentNoteId)
+            {
+                ScrollToAnchor(anchor);
+                return;
+            }
+
             if (!ConfirmDiscardIfDirty()) return;
             _editMode = false;
+            _pendingAnchor = string.IsNullOrEmpty(anchor) ? null : anchor;
             UpdateToolStripState();
             // 一覧の選択も同期
             foreach (ListViewItem item in lvNotes.Items)
@@ -689,10 +741,158 @@ namespace NoteBase.UI
             LoadNote(id);
         }
 
+        private void ScrollToAnchor(string anchor)
+        {
+            if (string.IsNullOrEmpty(anchor)) return;
+            if (webPreview.Document == null) return;
+            try
+            {
+                var elem = webPreview.Document.GetElementById(anchor);
+                if (elem != null) elem.ScrollIntoView(true);
+            }
+            catch
+            {
+                // 要素が見つからない・スクロール失敗は黙って無視
+            }
+        }
+
         private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
         {
             if (_dirty && !ConfirmDiscardIfDirty())
                 e.Cancel = true;
+        }
+
+        // ============================================================
+        // リンクのホバープレビュー (B)
+        // ============================================================
+
+        private void WebPreview_DocumentCompleted(object sender, WebBrowserDocumentCompletedEventArgs e)
+        {
+            // ドキュメントが切り替わったら hover 関連のリスナを張り直す
+            if (webPreview.Document != null)
+            {
+                webPreview.Document.MouseMove -= Document_MouseMove;
+                webPreview.Document.MouseMove += Document_MouseMove;
+            }
+
+            // 直前の遷移にアンカーが指定されていたらその位置までスクロール
+            if (!string.IsNullOrEmpty(_pendingAnchor))
+            {
+                var anchor = _pendingAnchor;
+                _pendingAnchor = null;
+                ScrollToAnchor(anchor);
+            }
+        }
+
+        private void Document_MouseMove(object sender, HtmlElementEventArgs e)
+        {
+            var elem = webPreview.Document != null
+                ? webPreview.Document.GetElementFromPoint(e.MousePosition) : null;
+            // 親方向にたどって <a> を探す
+            while (elem != null && !string.Equals(elem.TagName, "A", StringComparison.OrdinalIgnoreCase))
+                elem = elem.Parent;
+
+            if (elem != null)
+            {
+                var href = elem.GetAttribute("href");
+                var id = ExtractNoteIdFromHref(href);
+                if (!string.IsNullOrEmpty(id) && id != _currentNoteId)
+                {
+                    // 自ノート以外のノートリンク上をホバー中
+                    _hoverHideTimer.Stop();
+                    if (id != _hoveredNoteId)
+                    {
+                        _hoveredNoteId = id;
+                        if (_hoverPopup.Visible)
+                        {
+                            // 既に表示中なら即座に内容を差し替える
+                            ShowHoverPopupFor(id);
+                        }
+                        else
+                        {
+                            _hoverShowTimer.Stop();
+                            _hoverShowTimer.Start();
+                        }
+                    }
+                    return;
+                }
+            }
+
+            // ノートリンク上ではない
+            _hoverShowTimer.Stop();
+            _hoveredNoteId = null;
+            if (_hoverPopup.Visible)
+            {
+                _hoverHideTimer.Stop();
+                _hoverHideTimer.Start();
+            }
+        }
+
+        private void HoverShowTimer_Tick(object sender, EventArgs e)
+        {
+            _hoverShowTimer.Stop();
+            if (string.IsNullOrEmpty(_hoveredNoteId)) return;
+            ShowHoverPopupFor(_hoveredNoteId);
+        }
+
+        private void HoverHideTimer_Tick(object sender, EventArgs e)
+        {
+            _hoverHideTimer.Stop();
+            if (!_hoverPopup.Visible) return;
+            // カーソルがポップアップの上にあれば閉じない
+            if (_hoverPopup.Bounds.Contains(Cursor.Position))
+            {
+                _hoverHideTimer.Start();
+                return;
+            }
+            _hoverPopup.Hide();
+        }
+
+        private void ShowHoverPopupFor(string id)
+        {
+            if (!Directory.Exists(_paths.NoteDir(id))) return;
+
+            try
+            {
+                string body;
+                _repo.Load(id, out body);
+                var noteDir = _paths.NoteDir(id);
+                var baseUrl = "file:///" + noteDir.Replace('\\', '/').TrimEnd('/') + "/";
+                var html = MarkdownToHtml.Convert(body, ResolveTitleToId, baseUrl, ResolveNoteSummary);
+                _hoverPopup.SetContent(id, html);
+
+                if (!_hoverPopup.Visible)
+                {
+                    var pos = Cursor.Position;
+                    pos.Offset(16, 16);
+                    // 画面端で見切れないように調整
+                    var screen = Screen.FromPoint(pos).WorkingArea;
+                    if (pos.X + _hoverPopup.Width > screen.Right)
+                        pos.X = screen.Right - _hoverPopup.Width;
+                    if (pos.Y + _hoverPopup.Height > screen.Bottom)
+                        pos.Y = screen.Bottom - _hoverPopup.Height;
+                    _hoverPopup.Location = pos;
+                    _hoverPopup.Show(this);
+                }
+            }
+            catch
+            {
+                // ホバー失敗は静かに無視
+            }
+        }
+
+        private static string ExtractNoteIdFromHref(string href)
+        {
+            if (string.IsNullOrEmpty(href)) return null;
+            // file:// 絶対 / 相対両対応で /<id>/index.md パターンを抜き出す
+            var lower = href.ToLowerInvariant();
+            var idx = lower.LastIndexOf("/index.md");
+            if (idx < 0) return null;
+            // /index.md の手前のセグメントを取得
+            var head = href.Substring(0, idx);
+            var slash = head.LastIndexOf('/');
+            if (slash < 0) return null;
+            return head.Substring(slash + 1);
         }
     }
 }

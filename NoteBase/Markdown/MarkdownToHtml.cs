@@ -105,9 +105,13 @@ namespace NoteBase.Markdown
                 {
                     CloseLists(sb, ref inUl, ref inOl);
                     var level = hMatch.Groups[1].Value.Length;
-                    var content = ProcessInline(hMatch.Groups[2].Value, titleResolver, baseUri, noteSummaryResolver);
-                    sb.Append("<h").Append(level).Append(">")
-                      .Append(content)
+                    var rawText = hMatch.Groups[2].Value;
+                    var slug = MarkdownIndex.SlugifyHeading(rawText);
+                    var content = ProcessInline(rawText, titleResolver, baseUri, noteSummaryResolver);
+                    sb.Append("<h").Append(level);
+                    if (!string.IsNullOrEmpty(slug))
+                        sb.Append(" id=\"").Append(EscapeHtml(slug)).Append("\"");
+                    sb.Append(">").Append(content)
                       .Append("</h").Append(level).Append(">\n");
                     i++;
                     continue;
@@ -255,39 +259,77 @@ namespace NoteBase.Markdown
                     }
                 }
 
-                // wiki link [[Title]] または [[Title|alias]]
+                // wiki link [[Title]] / [[Title#anchor]] / [[Title|alias]] / [[Title#anchor|alias]] / [[#anchor]]
                 if (text[i] == '[' && i + 1 < text.Length && text[i + 1] == '[')
                 {
                     int end = text.IndexOf("]]", i + 2);
                     if (end > i + 1)
                     {
                         var inner = text.Substring(i + 2, end - i - 2);
-                        string title, alias;
+
+                        // | で表示 alias を分離
+                        string main, alias;
                         var pipeIdx = inner.IndexOf('|');
                         if (pipeIdx >= 0)
                         {
-                            title = inner.Substring(0, pipeIdx).Trim();
+                            main = inner.Substring(0, pipeIdx).Trim();
                             alias = inner.Substring(pipeIdx + 1).Trim();
                         }
                         else
                         {
-                            title = inner.Trim();
+                            main = inner.Trim();
                             alias = null;
                         }
 
+                        // # でアンカー部を分離
+                        string title, anchor;
+                        var hashIdx = main.IndexOf('#');
+                        if (hashIdx >= 0)
+                        {
+                            title = main.Substring(0, hashIdx).Trim();
+                            anchor = main.Substring(hashIdx + 1).Trim();
+                        }
+                        else
+                        {
+                            title = main;
+                            anchor = null;
+                        }
+
+                        // [[#anchor]] のような同一ノートアンカー
+                        if (string.IsNullOrEmpty(title))
+                        {
+                            if (!string.IsNullOrEmpty(anchor))
+                            {
+                                var sameNoteHref = "#" + Uri.EscapeDataString(anchor);
+                                var displayText = alias ?? anchor;
+                                sb.Append("<a href=\"").Append(EscapeHtml(sameNoteHref)).Append("\">")
+                                  .Append(EscapeHtml(displayText))
+                                  .Append("</a>");
+                            }
+                            i = end + 2;
+                            continue;
+                        }
+
+                        // 別ノートへのリンク (アンカーありなし両対応)
                         string id = (titleResolver != null) ? titleResolver(title) : null;
                         if (!string.IsNullOrEmpty(id))
                         {
-                            var wikiHref = EscapeHtml(ResolveUrl("../" + id + "/index.md", baseUri));
+                            var path = "../" + id + "/index.md";
+                            if (!string.IsNullOrEmpty(anchor))
+                                path += "#" + Uri.EscapeDataString(anchor);
+                            var wikiHref = EscapeHtml(ResolveUrl(path, baseUri));
                             var titleAttr = BuildTitleAttr(id, noteSummaryResolver);
+                            string display;
+                            if (!string.IsNullOrEmpty(alias)) display = alias;
+                            else if (!string.IsNullOrEmpty(anchor)) display = title + " > " + anchor;
+                            else display = title;
                             sb.Append("<a href=\"").Append(wikiHref).Append("\"")
                               .Append(titleAttr).Append(">")
-                              .Append(EscapeHtml(alias ?? title))
+                              .Append(EscapeHtml(display))
                               .Append("</a>");
                         }
                         else
                         {
-                            // 解決できない (リゾルバなし or タイトル未一致) → 注意喚起付きで原文表示
                             sb.Append("<span class=\"unresolved-link\">[[")
                               .Append(EscapeHtml(inner))
                               .Append("]]</span>");
@@ -305,7 +347,15 @@ namespace NoteBase.Markdown
                     {
                         var label = ProcessInline(m.Groups[1].Value, titleResolver, baseUri, noteSummaryResolver);
                         var rawUrl = m.Groups[2].Value;
-                        var url = EscapeHtml(ResolveUrl(rawUrl, baseUri));
+                        // フラグメントがあれば明示的にエンコード（日本語アンカー対策）
+                        var hashIdx = rawUrl.IndexOf('#');
+                        string urlForResolve;
+                        if (hashIdx >= 0)
+                            urlForResolve = rawUrl.Substring(0, hashIdx) + "#"
+                                + Uri.EscapeDataString(rawUrl.Substring(hashIdx + 1));
+                        else
+                            urlForResolve = rawUrl;
+                        var url = EscapeHtml(ResolveUrl(urlForResolve, baseUri));
                         // ノート内リンク (.../<id>/index.md) なら summary を title 属性に入れる
                         var targetId = ExtractNoteIdFromUrl(rawUrl);
                         var titleAttr = BuildTitleAttr(targetId, noteSummaryResolver);

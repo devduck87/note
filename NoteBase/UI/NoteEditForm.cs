@@ -139,7 +139,16 @@ namespace NoteBase.UI
                 if (picker.ShowDialog(this) == DialogResult.OK && picker.SelectedMeta != null)
                 {
                     var m = picker.SelectedMeta;
-                    var snippet = "[" + (m.Title ?? "") + "](../" + m.Id + "/index.md)";
+                    string snippet;
+                    if (string.IsNullOrEmpty(picker.SelectedAnchor))
+                    {
+                        snippet = "[" + (m.Title ?? "") + "](../" + m.Id + "/index.md)";
+                    }
+                    else
+                    {
+                        var display = (m.Title ?? "") + " > " + (picker.SelectedHeadingText ?? picker.SelectedAnchor);
+                        snippet = "[" + display + "](../" + m.Id + "/index.md#" + picker.SelectedAnchor + ")";
+                    }
                     InsertAtCursor(snippet);
                 }
             }

@@ -1,28 +1,35 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Text;
 using System.Windows.Forms;
 using NoteBase.Core;
+using NoteBase.Markdown;
 using NoteBase.Storage;
 
 namespace NoteBase.UI
 {
     /// <summary>
-    /// ノートを 1 件選択するダイアログ。
-    /// 検索ボックスでタイトルを絞り込み、Enter または ダブルクリックで確定する。
+    /// ノート + 見出しを選択するダイアログ。
+    /// 上段でノートを選び、下段で見出し（または「ノート全体」）を選ぶ。
     /// </summary>
     public partial class NotePickerDialog : Form
     {
+        private static readonly UTF8Encoding Utf8NoBom = new UTF8Encoding(false);
+
         private readonly NoteRepository _repo;
         private readonly string _excludeId;
         private List<NoteMeta> _allNotes;
 
         public NoteMeta SelectedMeta { get; private set; }
 
-        /// <summary>
-        /// </summary>
-        /// <param name="repo">ノートリポジトリ</param>
-        /// <param name="excludeId">除外する ID（自分自身を選ばせない用途、null 可）</param>
+        /// <summary>選択された見出しのスラグ（"ノート全体"のとき null）</summary>
+        public string SelectedAnchor { get; private set; }
+
+        /// <summary>選択された見出しの本文（表示用）。"ノート全体"のとき null</summary>
+        public string SelectedHeadingText { get; private set; }
+
         public NotePickerDialog(NoteRepository repo, string excludeId = null)
         {
             _repo = repo;
@@ -73,7 +80,6 @@ namespace NoteBase.UI
 
         private void TxtSearch_KeyDown(object sender, KeyEventArgs e)
         {
-            // 検索ボックスから矢印キーで一覧へフォーカス移動
             if (e.KeyCode == Keys.Down && lvNotes.Items.Count > 0)
             {
                 lvNotes.Focus();
@@ -81,12 +87,65 @@ namespace NoteBase.UI
             }
         }
 
+        private void LvNotes_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            // 選択ノートの見出しを下段に表示
+            lstHeadings.Items.Clear();
+            // 「ノート全体」を先頭に常時用意 (Tag = null)
+            lstHeadings.Items.Add(new HeadingItem(null, "ノート全体（見出しなし）"));
+
+            if (lvNotes.SelectedItems.Count == 0)
+            {
+                lstHeadings.SelectedIndex = 0;
+                return;
+            }
+            var meta = (NoteMeta)lvNotes.SelectedItems[0].Tag;
+            try
+            {
+                var bodyPath = _repo.Paths.IndexMdPath(meta.Id);
+                if (File.Exists(bodyPath))
+                {
+                    var body = File.ReadAllText(bodyPath, Utf8NoBom);
+                    var headings = MarkdownIndex.ExtractHeadings(body);
+                    foreach (var h in headings)
+                    {
+                        var indent = new string(' ', (h.Level - 1) * 2);
+                        var marker = new string('#', h.Level);
+                        var display = indent + marker + " " + h.Text;
+                        lstHeadings.Items.Add(new HeadingItem(h, display));
+                    }
+                }
+            }
+            catch
+            {
+                // 読み込みエラーは黙って無視 (見出しなし状態)
+            }
+            lstHeadings.SelectedIndex = 0;
+        }
+
         private void LvNotes_DoubleClick(object sender, EventArgs e)
         {
+            // 一覧側のダブルクリックは「ノート全体」での挿入
+            if (lvNotes.SelectedItems.Count == 0) return;
+            lstHeadings.SelectedIndex = 0;
             Confirm();
         }
 
         private void LvNotes_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Enter)
+            {
+                Confirm();
+                e.Handled = true;
+            }
+        }
+
+        private void LstHeadings_DoubleClick(object sender, EventArgs e)
+        {
+            Confirm();
+        }
+
+        private void LstHeadings_KeyDown(object sender, KeyEventArgs e)
         {
             if (e.KeyCode == Keys.Enter)
             {
@@ -108,8 +167,34 @@ namespace NoteBase.UI
                 lvNotes.Items[0].Selected = true;
             }
             SelectedMeta = (NoteMeta)lvNotes.SelectedItems[0].Tag;
+
+            HeadingItem h = null;
+            if (lstHeadings.SelectedItem is HeadingItem)
+                h = (HeadingItem)lstHeadings.SelectedItem;
+            if (h != null && h.Heading != null)
+            {
+                SelectedAnchor = h.Heading.Slug;
+                SelectedHeadingText = h.Heading.Text;
+            }
+            else
+            {
+                SelectedAnchor = null;
+                SelectedHeadingText = null;
+            }
             this.DialogResult = DialogResult.OK;
             Close();
+        }
+
+        private class HeadingItem
+        {
+            public HeadingInfo Heading { get; private set; }
+            private readonly string _display;
+            public HeadingItem(HeadingInfo h, string display)
+            {
+                Heading = h;
+                _display = display;
+            }
+            public override string ToString() { return _display; }
         }
     }
 }

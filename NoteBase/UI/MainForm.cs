@@ -26,6 +26,7 @@ namespace NoteBase.UI
         private bool _dirty;
         private bool _suspendDirty;
         private Dictionary<string, string> _titleToIdCache;
+        private Dictionary<string, string> _summaryCache;
         private readonly string _previewTempPath;
         private static readonly UTF8Encoding Utf8NoBom = new UTF8Encoding(false);
         private readonly Stack<string> _navHistory = new Stack<string>();
@@ -85,7 +86,8 @@ namespace NoteBase.UI
 
         private void RefreshNoteList()
         {
-            _titleToIdCache = null; // 一覧更新時に title→id キャッシュを無効化
+            _titleToIdCache = null; // 一覧更新時に各キャッシュを無効化
+            _summaryCache = null;
             var prevSelectedId = _currentNoteId;
 
             lvNotes.BeginUpdate();
@@ -226,7 +228,7 @@ namespace NoteBase.UI
 
             var noteDir = _paths.NoteDir(id);
             var baseUrl = "file:///" + noteDir.Replace('\\', '/').TrimEnd('/') + "/";
-            var html = MarkdownToHtml.Convert(body, ResolveTitleToId, baseUrl);
+            var html = MarkdownToHtml.Convert(body, ResolveTitleToId, baseUrl, ResolveNoteSummary);
 
             var doc = "<!DOCTYPE html><html><head>"
                 + "<meta charset=\"utf-8\"/>"
@@ -273,6 +275,37 @@ namespace NoteBase.UI
                 if (_titleToIdCache.ContainsKey(m.Title)) continue; // 重複は最初に見つけた方を採用
                 _titleToIdCache[m.Title] = m.Id;
             }
+        }
+
+        /// <summary>
+        /// ノート ID → 本文要約。リンクのホバーツールチップ表示に使う。
+        /// 必要時に index.md を読み込んで要約を抽出し、キャッシュする。
+        /// </summary>
+        private string ResolveNoteSummary(string id)
+        {
+            if (string.IsNullOrEmpty(id)) return null;
+            if (_summaryCache == null)
+                _summaryCache = new Dictionary<string, string>(StringComparer.Ordinal);
+
+            string cached;
+            if (_summaryCache.TryGetValue(id, out cached)) return cached;
+
+            string result = "";
+            try
+            {
+                var path = _paths.IndexMdPath(id);
+                if (File.Exists(path))
+                {
+                    var body = File.ReadAllText(path, Utf8NoBom);
+                    result = MarkdownSummary.Extract(body, 200);
+                }
+            }
+            catch
+            {
+                result = "";
+            }
+            _summaryCache[id] = result;
+            return result;
         }
 
         private void ShowEditCenter()

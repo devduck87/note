@@ -21,10 +21,17 @@ namespace NoteBase.Markdown
         private static readonly Regex OlRe = new Regex(@"^\s*\d+\.\s+(.+)$", RegexOptions.Compiled);
         private static readonly Regex ImageRe = new Regex(@"^!\[([^\]]*)\]\(([^)]+)\)", RegexOptions.Compiled);
         private static readonly Regex LinkRe = new Regex(@"^\[([^\]]+)\]\(([^)]+)\)", RegexOptions.Compiled);
+        private static readonly Regex NoteIdInUrlRe = new Regex(@"(?:^|/)([^/]+)/index\.md$",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         public static string Convert(string markdown)
         {
-            return Convert(markdown, null, null);
+            return Convert(markdown, null, null, null);
+        }
+
+        public static string Convert(string markdown, Func<string, string> titleResolver, string baseUrl)
+        {
+            return Convert(markdown, titleResolver, baseUrl, null);
         }
 
         /// <summary>
@@ -32,8 +39,10 @@ namespace NoteBase.Markdown
         /// </summary>
         /// <param name="markdown">変換対象</param>
         /// <param name="titleResolver">[[Title]] 用のタイトル→ノートID解決関数 (null 可)</param>
-        /// <param name="baseUrl">画像・リンクの相対パス解決用のベース URL (例: "file:///c:/.../notes/&lt;id&gt;/", null 可)</param>
-        public static string Convert(string markdown, Func<string, string> titleResolver, string baseUrl = null)
+        /// <param name="baseUrl">画像・リンクの相対パス解決用のベース URL (null 可)</param>
+        /// <param name="noteSummaryResolver">ノートID→要約テキスト解決関数。リンクの title 属性に使う (null 可)</param>
+        public static string Convert(string markdown, Func<string, string> titleResolver,
+            string baseUrl, Func<string, string> noteSummaryResolver)
         {
             if (string.IsNullOrEmpty(markdown)) return "";
 
@@ -96,7 +105,7 @@ namespace NoteBase.Markdown
                 {
                     CloseLists(sb, ref inUl, ref inOl);
                     var level = hMatch.Groups[1].Value.Length;
-                    var content = ProcessInline(hMatch.Groups[2].Value, titleResolver, baseUri);
+                    var content = ProcessInline(hMatch.Groups[2].Value, titleResolver, baseUri, noteSummaryResolver);
                     sb.Append("<h").Append(level).Append(">")
                       .Append(content)
                       .Append("</h").Append(level).Append(">\n");
@@ -112,7 +121,7 @@ namespace NoteBase.Markdown
                     if (!inUl) { sb.Append("<ul class=\"task-list\">\n"); inUl = true; }
                     var checkedAttr = (taskMatch.Groups[1].Value.ToLowerInvariant() == "x")
                         ? " checked" : "";
-                    var content = ProcessInline(taskMatch.Groups[2].Value, titleResolver, baseUri);
+                    var content = ProcessInline(taskMatch.Groups[2].Value, titleResolver, baseUri, noteSummaryResolver);
                     sb.Append("<li><input type=\"checkbox\" disabled")
                       .Append(checkedAttr)
                       .Append("/> ")
@@ -129,7 +138,7 @@ namespace NoteBase.Markdown
                     if (inOl) { sb.Append("</ol>\n"); inOl = false; }
                     if (!inUl) { sb.Append("<ul>\n"); inUl = true; }
                     sb.Append("<li>")
-                      .Append(ProcessInline(ulMatch.Groups[1].Value, titleResolver, baseUri))
+                      .Append(ProcessInline(ulMatch.Groups[1].Value, titleResolver, baseUri, noteSummaryResolver))
                       .Append("</li>\n");
                     i++;
                     continue;
@@ -142,7 +151,7 @@ namespace NoteBase.Markdown
                     if (inUl) { sb.Append("</ul>\n"); inUl = false; }
                     if (!inOl) { sb.Append("<ol>\n"); inOl = true; }
                     sb.Append("<li>")
-                      .Append(ProcessInline(olMatch.Groups[1].Value, titleResolver, baseUri))
+                      .Append(ProcessInline(olMatch.Groups[1].Value, titleResolver, baseUri, noteSummaryResolver))
                       .Append("</li>\n");
                     i++;
                     continue;
@@ -151,7 +160,7 @@ namespace NoteBase.Markdown
                 // 段落（連続する非空行は <br/> で結合）
                 CloseLists(sb, ref inUl, ref inOl);
                 sb.Append("<p>");
-                sb.Append(ProcessInline(line, titleResolver, baseUri));
+                sb.Append(ProcessInline(line, titleResolver, baseUri, noteSummaryResolver));
                 i++;
                 while (i < lines.Length && !string.IsNullOrWhiteSpace(lines[i])
                     && !lines[i].StartsWith("#")
@@ -162,7 +171,7 @@ namespace NoteBase.Markdown
                     && !HrRe.IsMatch(lines[i].Trim()))
                 {
                     sb.Append("<br/>");
-                    sb.Append(ProcessInline(lines[i], titleResolver, baseUri));
+                    sb.Append(ProcessInline(lines[i], titleResolver, baseUri, noteSummaryResolver));
                     i++;
                 }
                 sb.Append("</p>\n");
@@ -190,11 +199,27 @@ namespace NoteBase.Markdown
             return url;
         }
 
+        private static string ExtractNoteIdFromUrl(string url)
+        {
+            if (string.IsNullOrEmpty(url)) return null;
+            var m = NoteIdInUrlRe.Match(url);
+            return m.Success ? m.Groups[1].Value : null;
+        }
+
+        private static string BuildTitleAttr(string id, Func<string, string> noteSummaryResolver)
+        {
+            if (string.IsNullOrEmpty(id) || noteSummaryResolver == null) return "";
+            var summary = noteSummaryResolver(id);
+            if (string.IsNullOrEmpty(summary)) return "";
+            return " title=\"" + EscapeHtml(summary) + "\"";
+        }
+
         /// <summary>
         /// インライン要素を処理する。
         /// 順序: コード → 画像 → wiki link → リンク → 強調 → 斜体 → 通常文字。
         /// </summary>
-        private static string ProcessInline(string text, Func<string, string> titleResolver, Uri baseUri)
+        private static string ProcessInline(string text, Func<string, string> titleResolver,
+            Uri baseUri, Func<string, string> noteSummaryResolver)
         {
             if (string.IsNullOrEmpty(text)) return "";
 
@@ -254,7 +279,9 @@ namespace NoteBase.Markdown
                         if (!string.IsNullOrEmpty(id))
                         {
                             var wikiHref = EscapeHtml(ResolveUrl("../" + id + "/index.md", baseUri));
-                            sb.Append("<a href=\"").Append(wikiHref).Append("\">")
+                            var titleAttr = BuildTitleAttr(id, noteSummaryResolver);
+                            sb.Append("<a href=\"").Append(wikiHref).Append("\"")
+                              .Append(titleAttr).Append(">")
                               .Append(EscapeHtml(alias ?? title))
                               .Append("</a>");
                         }
@@ -276,9 +303,14 @@ namespace NoteBase.Markdown
                     var m = LinkRe.Match(text.Substring(i));
                     if (m.Success)
                     {
-                        var label = ProcessInline(m.Groups[1].Value, titleResolver, baseUri);
-                        var url = EscapeHtml(ResolveUrl(m.Groups[2].Value, baseUri));
-                        sb.Append("<a href=\"").Append(url).Append("\">")
+                        var label = ProcessInline(m.Groups[1].Value, titleResolver, baseUri, noteSummaryResolver);
+                        var rawUrl = m.Groups[2].Value;
+                        var url = EscapeHtml(ResolveUrl(rawUrl, baseUri));
+                        // ノート内リンク (.../<id>/index.md) なら summary を title 属性に入れる
+                        var targetId = ExtractNoteIdFromUrl(rawUrl);
+                        var titleAttr = BuildTitleAttr(targetId, noteSummaryResolver);
+                        sb.Append("<a href=\"").Append(url).Append("\"")
+                          .Append(titleAttr).Append(">")
                           .Append(label).Append("</a>");
                         i += m.Length;
                         continue;
@@ -292,7 +324,7 @@ namespace NoteBase.Markdown
                     if (end > i)
                     {
                         var inner = text.Substring(i + 2, end - i - 2);
-                        sb.Append("<strong>").Append(ProcessInline(inner, titleResolver, baseUri)).Append("</strong>");
+                        sb.Append("<strong>").Append(ProcessInline(inner, titleResolver, baseUri, noteSummaryResolver)).Append("</strong>");
                         i = end + 2;
                         continue;
                     }
@@ -305,7 +337,7 @@ namespace NoteBase.Markdown
                     if (end > i)
                     {
                         var inner = text.Substring(i + 1, end - i - 1);
-                        sb.Append("<em>").Append(ProcessInline(inner, titleResolver, baseUri)).Append("</em>");
+                        sb.Append("<em>").Append(ProcessInline(inner, titleResolver, baseUri, noteSummaryResolver)).Append("</em>");
                         i = end + 1;
                         continue;
                     }

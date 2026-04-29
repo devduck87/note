@@ -51,6 +51,7 @@
     <Compile Include="Core\NoteStatus.cs" />
     <Compile Include="Core\NoteType.cs" />
     <Compile Include="Core\Schedule.cs" />
+    <Compile Include="Markdown\MarkdownSummary.cs" />
     <Compile Include="Markdown\MarkdownToHtml.cs" />
     <Compile Include="Storage\AppPaths.cs" />
     <Compile Include="Storage\AtomicWriter.cs" />

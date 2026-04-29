@@ -28,6 +28,8 @@ namespace NoteBase.UI
         private Dictionary<string, string> _titleToIdCache;
         private readonly string _previewTempPath;
         private static readonly UTF8Encoding Utf8NoBom = new UTF8Encoding(false);
+        private readonly Stack<string> _navHistory = new Stack<string>();
+        private bool _navigatingBack;
 
         public MainForm()
         {
@@ -139,6 +141,14 @@ namespace NoteBase.UI
         {
             try
             {
+                // 戻る用に直前のノートを履歴へ積む（戻る操作時は積まない）
+                if (!_navigatingBack
+                    && !string.IsNullOrEmpty(_currentNoteId)
+                    && _currentNoteId != id)
+                {
+                    _navHistory.Push(_currentNoteId);
+                }
+
                 string body;
                 _currentMeta = _repo.Load(id, out body);
                 _currentNoteId = id;
@@ -161,6 +171,7 @@ namespace NoteBase.UI
                 else ShowPreviewCenter(id, body);
 
                 UpdateToolStripState();
+                UpdateBackButtonState();
             }
             catch (Exception ex)
             {
@@ -328,6 +339,65 @@ namespace NoteBase.UI
             btnSave.Text = _dirty ? "保存* (Ctrl+S)" : "保存 (Ctrl+S)";
         }
 
+        private void UpdateBackButtonState()
+        {
+            btnBack.Enabled = _navHistory.Count > 0;
+        }
+
+        // ============================================================
+        // 戻るナビゲーション
+        // ============================================================
+
+        private void BtnBack_Click(object sender, EventArgs e)
+        {
+            NavigateBack();
+        }
+
+        private void NavigateBack()
+        {
+            if (_navHistory.Count == 0) return;
+            if (!ConfirmDiscardIfDirty()) return;
+
+            // 削除済みのノートはスキップして次の有効な ID を探す
+            string prevId = null;
+            while (_navHistory.Count > 0)
+            {
+                var candidate = _navHistory.Pop();
+                if (Directory.Exists(_paths.NoteDir(candidate)))
+                {
+                    prevId = candidate;
+                    break;
+                }
+            }
+            if (prevId == null)
+            {
+                UpdateBackButtonState();
+                return;
+            }
+
+            _navigatingBack = true;
+            try
+            {
+                _editMode = false;
+                UpdateToolStripState();
+                foreach (ListViewItem item in lvNotes.Items)
+                {
+                    if ((string)item.Tag == prevId)
+                    {
+                        item.Selected = true;
+                        item.EnsureVisible();
+                        break;
+                    }
+                }
+                LoadNote(prevId);
+            }
+            finally
+            {
+                _navigatingBack = false;
+            }
+            UpdateBackButtonState();
+        }
+
         private void BtnSave_Click(object sender, EventArgs e)
         {
             if (_currentMeta == null) return;
@@ -484,6 +554,11 @@ namespace NoteBase.UI
                     InsertNoteLinkAtCursor();
                     e.Handled = true;
                 }
+            }
+            else if (e.Alt && e.KeyCode == Keys.Left)
+            {
+                NavigateBack();
+                e.Handled = true;
             }
         }
 

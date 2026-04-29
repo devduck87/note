@@ -12,6 +12,8 @@ namespace NoteBase.UI
         }
 
         private System.Windows.Forms.ToolStrip toolStrip;
+        private System.Windows.Forms.ToolStripButton btnBack;
+        private System.Windows.Forms.ToolStripSeparator sep0;
         private System.Windows.Forms.ToolStripLabel lblSearch;
         private System.Windows.Forms.ToolStripTextBox txtSearch;
         private System.Windows.Forms.ToolStripSeparator sep1;
@@ -60,6 +62,8 @@ namespace NoteBase.UI
             this.components = new System.ComponentModel.Container();
 
             this.toolStrip = new System.Windows.Forms.ToolStrip();
+            this.btnBack = new System.Windows.Forms.ToolStripButton();
+            this.sep0 = new System.Windows.Forms.ToolStripSeparator();
             this.lblSearch = new System.Windows.Forms.ToolStripLabel();
             this.txtSearch = new System.Windows.Forms.ToolStripTextBox();
             this.sep1 = new System.Windows.Forms.ToolStripSeparator();
@@ -118,11 +122,17 @@ namespace NoteBase.UI
             this.toolStrip.GripStyle = System.Windows.Forms.ToolStripGripStyle.Hidden;
             this.toolStrip.Items.AddRange(new System.Windows.Forms.ToolStripItem[]
             {
+                this.btnBack, this.sep0,
                 this.lblSearch, this.txtSearch, this.sep1,
                 this.btnNew, this.btnEdit, this.btnSave, this.btnCancel
             });
             this.toolStrip.Location = new System.Drawing.Point(0, 0);
             this.toolStrip.Size = new System.Drawing.Size(1200, 25);
+
+            this.btnBack.Text = "← 戻る (Alt+←)";
+            this.btnBack.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
+            this.btnBack.Enabled = false;
+            this.btnBack.Click += new System.EventHandler(this.BtnBack_Click);
 
             this.lblSearch.Text = "検索:";
 

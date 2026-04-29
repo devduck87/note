@@ -45,11 +45,12 @@ namespace NoteBase.UI
 
         /// <summary>
         /// ポップアップに表示する HTML を更新する。
-        /// anchor が指定されていればドキュメント読込完了後に該当要素までスクロールする。
+        /// anchor が指定されていれば URL フラグメントとして付与し、ブラウザに自動スクロールさせる。
         /// </summary>
         public void SetContent(string noteId, string innerHtml, string anchor = null)
         {
             _currentNoteId = noteId;
+            // フォールバック用にも保持しておく
             _pendingAnchor = string.IsNullOrEmpty(anchor) ? null : anchor;
 
             var doc = "<!DOCTYPE html><html><head>"
@@ -72,7 +73,18 @@ namespace NoteBase.UI
                 + "</body></html>";
 
             File.WriteAllText(_tempHtmlPath, doc, Utf8NoBom);
-            webContent.Navigate(_tempHtmlPath);
+
+            string navigateUrl;
+            if (!string.IsNullOrEmpty(anchor))
+            {
+                var fileUri = new Uri(_tempHtmlPath).AbsoluteUri;
+                navigateUrl = fileUri + "#" + Uri.EscapeDataString(anchor);
+            }
+            else
+            {
+                navigateUrl = _tempHtmlPath;
+            }
+            webContent.Navigate(navigateUrl);
         }
 
         public string CurrentNoteId

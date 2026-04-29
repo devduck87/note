@@ -23,6 +23,9 @@ namespace NoteBase.Markdown
         private static readonly Regex LinkRe = new Regex(@"^\[([^\]]+)\]\(([^)]+)\)", RegexOptions.Compiled);
         private static readonly Regex NoteIdInUrlRe = new Regex(@"(?:^|/)([^/]+)/index\.md$",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        // ブロック末尾の ^id (Obsidian 風) 検出用
+        internal static readonly Regex BlockIdRe = new Regex(@"\s+\^([a-zA-Z0-9-]+)\s*$",
+            RegexOptions.Compiled);
 
         public static string Convert(string markdown)
         {
@@ -117,7 +120,7 @@ namespace NoteBase.Markdown
                     continue;
                 }
 
-                // タスクリスト
+                // タスクリスト (^id 対応)
                 var taskMatch = TaskRe.Match(line);
                 if (taskMatch.Success)
                 {
@@ -125,46 +128,59 @@ namespace NoteBase.Markdown
                     if (!inUl) { sb.Append("<ul class=\"task-list\">\n"); inUl = true; }
                     var checkedAttr = (taskMatch.Groups[1].Value.ToLowerInvariant() == "x")
                         ? " checked" : "";
-                    var content = ProcessInline(taskMatch.Groups[2].Value, titleResolver, baseUri, noteSummaryResolver);
-                    sb.Append("<li><input type=\"checkbox\" disabled")
-                      .Append(checkedAttr)
-                      .Append("/> ")
+                    string blockId;
+                    var rawText = ExtractTrailingBlockId(taskMatch.Groups[2].Value, out blockId);
+                    var content = ProcessInline(rawText, titleResolver, baseUri, noteSummaryResolver);
+                    sb.Append("<li");
+                    if (!string.IsNullOrEmpty(blockId))
+                        sb.Append(" id=\"").Append(EscapeHtml(blockId)).Append("\"");
+                    sb.Append("><input type=\"checkbox\" disabled")
+                      .Append(checkedAttr).Append("/> ")
                       .Append(content)
                       .Append("</li>\n");
                     i++;
                     continue;
                 }
 
-                // 順不同リスト
+                // 順不同リスト (^id 対応)
                 var ulMatch = UlRe.Match(line);
                 if (ulMatch.Success)
                 {
                     if (inOl) { sb.Append("</ol>\n"); inOl = false; }
                     if (!inUl) { sb.Append("<ul>\n"); inUl = true; }
-                    sb.Append("<li>")
-                      .Append(ProcessInline(ulMatch.Groups[1].Value, titleResolver, baseUri, noteSummaryResolver))
+                    string blockId;
+                    var rawText = ExtractTrailingBlockId(ulMatch.Groups[1].Value, out blockId);
+                    sb.Append("<li");
+                    if (!string.IsNullOrEmpty(blockId))
+                        sb.Append(" id=\"").Append(EscapeHtml(blockId)).Append("\"");
+                    sb.Append(">")
+                      .Append(ProcessInline(rawText, titleResolver, baseUri, noteSummaryResolver))
                       .Append("</li>\n");
                     i++;
                     continue;
                 }
 
-                // 順序付きリスト
+                // 順序付きリスト (^id 対応)
                 var olMatch = OlRe.Match(line);
                 if (olMatch.Success)
                 {
                     if (inUl) { sb.Append("</ul>\n"); inUl = false; }
                     if (!inOl) { sb.Append("<ol>\n"); inOl = true; }
-                    sb.Append("<li>")
-                      .Append(ProcessInline(olMatch.Groups[1].Value, titleResolver, baseUri, noteSummaryResolver))
+                    string blockId;
+                    var rawText = ExtractTrailingBlockId(olMatch.Groups[1].Value, out blockId);
+                    sb.Append("<li");
+                    if (!string.IsNullOrEmpty(blockId))
+                        sb.Append(" id=\"").Append(EscapeHtml(blockId)).Append("\"");
+                    sb.Append(">")
+                      .Append(ProcessInline(rawText, titleResolver, baseUri, noteSummaryResolver))
                       .Append("</li>\n");
                     i++;
                     continue;
                 }
 
-                // 段落（連続する非空行は <br/> で結合）
+                // 段落（連続する非空行は <br/> で結合、末尾行に ^id があれば <p id=...> に出す）
                 CloseLists(sb, ref inUl, ref inOl);
-                sb.Append("<p>");
-                sb.Append(ProcessInline(line, titleResolver, baseUri, noteSummaryResolver));
+                var paraLines = new List<string> { line };
                 i++;
                 while (i < lines.Length && !string.IsNullOrWhiteSpace(lines[i])
                     && !lines[i].StartsWith("#")
@@ -174,9 +190,20 @@ namespace NoteBase.Markdown
                     && !TaskRe.IsMatch(lines[i])
                     && !HrRe.IsMatch(lines[i].Trim()))
                 {
-                    sb.Append("<br/>");
-                    sb.Append(ProcessInline(lines[i], titleResolver, baseUri, noteSummaryResolver));
+                    paraLines.Add(lines[i]);
                     i++;
+                }
+                string paraBlockId;
+                var lastIdx = paraLines.Count - 1;
+                paraLines[lastIdx] = ExtractTrailingBlockId(paraLines[lastIdx], out paraBlockId);
+                sb.Append("<p");
+                if (!string.IsNullOrEmpty(paraBlockId))
+                    sb.Append(" id=\"").Append(EscapeHtml(paraBlockId)).Append("\"");
+                sb.Append(">");
+                for (int k = 0; k < paraLines.Count; k++)
+                {
+                    if (k > 0) sb.Append("<br/>");
+                    sb.Append(ProcessInline(paraLines[k], titleResolver, baseUri, noteSummaryResolver));
                 }
                 sb.Append("</p>\n");
             }
@@ -201,6 +228,22 @@ namespace NoteBase.Markdown
             Uri resolved;
             if (Uri.TryCreate(baseUri, url, out resolved)) return resolved.AbsoluteUri;
             return url;
+        }
+
+        /// <summary>
+        /// 行末の ^id を取り出す。一致したら id を返し、引数 line から ^id 部分を取り除いた文字列を返す。
+        /// </summary>
+        internal static string ExtractTrailingBlockId(string line, out string id)
+        {
+            if (line == null) { id = null; return null; }
+            var m = BlockIdRe.Match(line);
+            if (m.Success)
+            {
+                id = m.Groups[1].Value;
+                return line.Substring(0, m.Index);
+            }
+            id = null;
+            return line;
         }
 
         private static string ExtractNoteIdFromUrl(string url)
@@ -288,6 +331,8 @@ namespace NoteBase.Markdown
                         {
                             title = main.Substring(0, hashIdx).Trim();
                             anchor = main.Substring(hashIdx + 1).Trim();
+                            // ^abc はブロック ID マーカー → HTML id には ^ を含めない
+                            if (anchor.StartsWith("^")) anchor = anchor.Substring(1);
                         }
                         else
                         {
@@ -295,7 +340,7 @@ namespace NoteBase.Markdown
                             anchor = null;
                         }
 
-                        // [[#anchor]] のような同一ノートアンカー
+                        // [[#anchor]] / [[#^abc]] のような同一ノートアンカー
                         if (string.IsNullOrEmpty(title))
                         {
                             if (!string.IsNullOrEmpty(anchor))
@@ -348,13 +393,20 @@ namespace NoteBase.Markdown
                         var label = ProcessInline(m.Groups[1].Value, titleResolver, baseUri, noteSummaryResolver);
                         var rawUrl = m.Groups[2].Value;
                         // フラグメントがあれば明示的にエンコード（日本語アンカー対策）
+                        // また ^ 接頭辞付き (ブロック ID マーカー) なら剥がす
                         var hashIdx = rawUrl.IndexOf('#');
                         string urlForResolve;
                         if (hashIdx >= 0)
+                        {
+                            var frag = rawUrl.Substring(hashIdx + 1);
+                            if (frag.StartsWith("^")) frag = frag.Substring(1);
                             urlForResolve = rawUrl.Substring(0, hashIdx) + "#"
-                                + Uri.EscapeDataString(rawUrl.Substring(hashIdx + 1));
+                                + Uri.EscapeDataString(frag);
+                        }
                         else
+                        {
                             urlForResolve = rawUrl;
+                        }
                         var url = EscapeHtml(ResolveUrl(urlForResolve, baseUri));
                         // ノート内リンク (.../<id>/index.md) なら summary を title 属性に入れる
                         var targetId = ExtractNoteIdFromUrl(rawUrl);

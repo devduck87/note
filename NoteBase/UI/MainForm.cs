@@ -275,7 +275,20 @@ namespace NoteBase.UI
             // IE のセキュリティ制約で遷移できないため、
             // 一時ファイル経由で Navigate して URL を file:// にする。
             File.WriteAllText(_previewTempPath, doc, Utf8NoBom);
-            webPreview.Navigate(_previewTempPath);
+
+            // _pendingAnchor があれば URL フラグメントに含めてブラウザに自動スクロールさせる。
+            // (GetElementById/ScrollIntoView より確実)
+            string navigateUrl;
+            if (!string.IsNullOrEmpty(_pendingAnchor))
+            {
+                var fileUri = new Uri(_previewTempPath).AbsoluteUri;
+                navigateUrl = fileUri + "#" + Uri.EscapeDataString(_pendingAnchor);
+            }
+            else
+            {
+                navigateUrl = _previewTempPath;
+            }
+            webPreview.Navigate(navigateUrl);
         }
 
         /// <summary>
@@ -626,26 +639,73 @@ namespace NoteBase.UI
         {
             using (var picker = new NotePickerDialog(_repo, _currentNoteId))
             {
-                if (picker.ShowDialog(this) == DialogResult.OK && picker.SelectedMeta != null)
-                {
-                    var snippet = BuildNoteLinkSnippet(picker.SelectedMeta,
-                        picker.SelectedAnchor, picker.SelectedHeadingText);
-                    int pos = txtBody.SelectionStart;
-                    txtBody.Text = txtBody.Text.Insert(pos, snippet);
-                    txtBody.SelectionStart = pos + snippet.Length;
-                    txtBody.SelectionLength = 0;
-                    txtBody.Focus();
-                }
+                if (picker.ShowDialog(this) != DialogResult.OK || picker.SelectedMeta == null)
+                    return;
+
+                var snippet = BuildLinkSnippetFromPicker(picker);
+                if (string.IsNullOrEmpty(snippet)) return;
+
+                int pos = txtBody.SelectionStart;
+                txtBody.Text = txtBody.Text.Insert(pos, snippet);
+                txtBody.SelectionStart = pos + snippet.Length;
+                txtBody.SelectionLength = 0;
+                txtBody.Focus();
+
+                // 対象ノートが書き換わった可能性があるのでキャッシュ無効化
+                _summaryCache = null;
+                _titleToIdCache = null;
             }
         }
 
-        private static string BuildNoteLinkSnippet(NoteMeta m, string anchor, string headingText)
+        /// <summary>
+        /// ピッカーで選択された対象から、本文に挿入する Markdown スニペットを生成する。
+        /// 段落／リスト項目の場合は EnsureBlockId で ^id を確保する (必要なら対象ノートを書き換える)。
+        /// </summary>
+        private string BuildLinkSnippetFromPicker(NotePickerDialog picker)
         {
+            var m = picker.SelectedMeta;
             var title = m.Title ?? "";
-            if (string.IsNullOrEmpty(anchor))
+
+            // ノート全体
+            if (string.IsNullOrEmpty(picker.SelectedAnchor)
+                && picker.SelectedBlockKind == null)
+            {
                 return "[" + title + "](../" + m.Id + "/index.md)";
-            var display = title + " > " + (headingText ?? anchor);
-            return "[" + display + "](../" + m.Id + "/index.md#" + anchor + ")";
+            }
+
+            // 見出し
+            if (picker.SelectedBlockKind == BlockKind.Heading)
+            {
+                var display = title + " > " + (picker.SelectedHeadingText ?? picker.SelectedAnchor);
+                return "[" + display + "](../" + m.Id + "/index.md#" + picker.SelectedAnchor + ")";
+            }
+
+            // 段落 / リスト項目: ^id を確保
+            string anchor = picker.SelectedAnchor; // 既存があればそれ
+            if (string.IsNullOrEmpty(anchor) && picker.SelectedBlockLineEnd >= 0)
+            {
+                try
+                {
+                    anchor = _repo.EnsureBlockId(m.Id, picker.SelectedBlockLineEnd);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(this, "ブロック ID の付与に失敗しました: " + ex.Message,
+                        "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return null;
+                }
+            }
+            if (string.IsNullOrEmpty(anchor))
+            {
+                // 失敗 → ノート全体リンクにフォールバック
+                return "[" + title + "](../" + m.Id + "/index.md)";
+            }
+
+            // 表示テキスト: ブロックの先頭抜粋を alias として使う
+            var snippetText = picker.SelectedHeadingText ?? "";
+            if (snippetText.Length > 60) snippetText = snippetText.Substring(0, 60) + "…";
+            var displayBlock = title + " > " + snippetText;
+            return "[" + displayBlock + "](../" + m.Id + "/index.md#" + anchor + ")";
         }
 
         // ============================================================
@@ -747,15 +807,25 @@ namespace NoteBase.UI
         private void ScrollToAnchor(string anchor)
         {
             if (string.IsNullOrEmpty(anchor)) return;
-            if (webPreview.Document == null) return;
             try
             {
-                var elem = webPreview.Document.GetElementById(anchor);
-                if (elem != null) elem.ScrollIntoView(true);
+                // URL フラグメントを変えて Navigate するとブラウザが自動でスクロールする
+                // (file 内容は変わっていないので reload は走らずスクロールだけ)
+                var fileUri = new Uri(_previewTempPath).AbsoluteUri;
+                webPreview.Navigate(fileUri + "#" + Uri.EscapeDataString(anchor));
             }
             catch
             {
-                // 要素が見つからない・スクロール失敗は黙って無視
+                // フォールバック: GetElementById/ScrollIntoView
+                try
+                {
+                    if (webPreview.Document != null)
+                    {
+                        var elem = webPreview.Document.GetElementById(anchor);
+                        if (elem != null) elem.ScrollIntoView(true);
+                    }
+                }
+                catch { /* スクロール失敗は無視 */ }
             }
         }
 

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Text.RegularExpressions;
 using NoteBase.Core;
 
 namespace NoteBase.Storage
@@ -130,6 +131,80 @@ namespace NoteBase.Storage
         public void MoveToTrash(string id)
         {
             _trash.MoveNote(id);
+        }
+
+        // ============================================================
+        // ブロック ID 自動付与 (Phase 3b)
+        // ============================================================
+
+        private static readonly Regex BlockIdRe =
+            new Regex(@"\s+\^([a-zA-Z0-9-]+)\s*$", RegexOptions.Compiled);
+        private static readonly Regex AnyBlockIdRe =
+            new Regex(@"\s\^([a-zA-Z0-9-]+)", RegexOptions.Compiled);
+        private static readonly Random _idRandom = new Random();
+        private static readonly object _idLock = new object();
+        private const string IdAlphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
+
+        /// <summary>
+        /// 指定行末にブロック ID (^xxxxxx) を確保する。既に ID が付いていればそれを返す。
+        /// 付いていなければ生成して該当行末に追記し、上書き保存する。
+        /// </summary>
+        /// <param name="noteId">対象ノート ID</param>
+        /// <param name="lineEnd">ID を付与する行 (0 始まり)</param>
+        /// <returns>確保された ID</returns>
+        public string EnsureBlockId(string noteId, int lineEnd)
+        {
+            string body;
+            var meta = Load(noteId, out body);
+
+            var normalized = (body ?? "").Replace("\r\n", "\n").Replace("\r", "\n");
+            var lines = normalized.Split('\n');
+            if (lineEnd < 0 || lineEnd >= lines.Length) return null;
+
+            // 既存 ID のチェック
+            var existing = BlockIdRe.Match(lines[lineEnd]);
+            if (existing.Success) return existing.Groups[1].Value;
+
+            // 重複しない新規 ID を生成
+            var allIds = ExtractAllBlockIds(body);
+            string newId;
+            for (int attempt = 0; ; attempt++)
+            {
+                newId = GenerateBlockId();
+                if (!allIds.Contains(newId)) break;
+                if (attempt > 100) return null; // 念のため
+            }
+
+            // 行末へ追記 (前後の空白整理)
+            var rebuilt = new string[lines.Length];
+            for (int i = 0; i < lines.Length; i++) rebuilt[i] = lines[i];
+            var trimmed = rebuilt[lineEnd].TrimEnd();
+            if (trimmed.Length == 0) return null; // 空行には付けない
+            rebuilt[lineEnd] = trimmed + " ^" + newId;
+
+            var newBody = string.Join("\r\n", rebuilt);
+            SaveExisting(meta, newBody);
+            return newId;
+        }
+
+        private static HashSet<string> ExtractAllBlockIds(string body)
+        {
+            var set = new HashSet<string>(StringComparer.Ordinal);
+            if (string.IsNullOrEmpty(body)) return set;
+            foreach (Match m in AnyBlockIdRe.Matches(body))
+                set.Add(m.Groups[1].Value);
+            return set;
+        }
+
+        private static string GenerateBlockId()
+        {
+            var sb = new StringBuilder(6);
+            lock (_idLock)
+            {
+                for (int i = 0; i < 6; i++)
+                    sb.Append(IdAlphabet[_idRandom.Next(IdAlphabet.Length)]);
+            }
+            return sb.ToString();
         }
 
         /// <summary>

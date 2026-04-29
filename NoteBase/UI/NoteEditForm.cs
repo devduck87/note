@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Windows.Forms;
 using NoteBase.Core;
+using NoteBase.Markdown;
 using NoteBase.Storage;
 
 namespace NoteBase.UI
@@ -136,22 +137,51 @@ namespace NoteBase.UI
             if (_draft == null) return;
             using (var picker = new NotePickerDialog(_repo, _draft.Id))
             {
-                if (picker.ShowDialog(this) == DialogResult.OK && picker.SelectedMeta != null)
+                if (picker.ShowDialog(this) != DialogResult.OK || picker.SelectedMeta == null)
+                    return;
+                var snippet = BuildLinkSnippetFromPicker(picker);
+                if (!string.IsNullOrEmpty(snippet)) InsertAtCursor(snippet);
+            }
+        }
+
+        private string BuildLinkSnippetFromPicker(NotePickerDialog picker)
+        {
+            var m = picker.SelectedMeta;
+            var title = m.Title ?? "";
+
+            if (string.IsNullOrEmpty(picker.SelectedAnchor)
+                && picker.SelectedBlockKind == null)
+            {
+                return "[" + title + "](../" + m.Id + "/index.md)";
+            }
+
+            if (picker.SelectedBlockKind == BlockKind.Heading)
+            {
+                var display = title + " > " + (picker.SelectedHeadingText ?? picker.SelectedAnchor);
+                return "[" + display + "](../" + m.Id + "/index.md#" + picker.SelectedAnchor + ")";
+            }
+
+            string anchor = picker.SelectedAnchor;
+            if (string.IsNullOrEmpty(anchor) && picker.SelectedBlockLineEnd >= 0)
+            {
+                try
                 {
-                    var m = picker.SelectedMeta;
-                    string snippet;
-                    if (string.IsNullOrEmpty(picker.SelectedAnchor))
-                    {
-                        snippet = "[" + (m.Title ?? "") + "](../" + m.Id + "/index.md)";
-                    }
-                    else
-                    {
-                        var display = (m.Title ?? "") + " > " + (picker.SelectedHeadingText ?? picker.SelectedAnchor);
-                        snippet = "[" + display + "](../" + m.Id + "/index.md#" + picker.SelectedAnchor + ")";
-                    }
-                    InsertAtCursor(snippet);
+                    anchor = _repo.EnsureBlockId(m.Id, picker.SelectedBlockLineEnd);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(this, "ブロック ID の付与に失敗しました: " + ex.Message,
+                        "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return null;
                 }
             }
+            if (string.IsNullOrEmpty(anchor))
+                return "[" + title + "](../" + m.Id + "/index.md)";
+
+            var snippetText = picker.SelectedHeadingText ?? "";
+            if (snippetText.Length > 60) snippetText = snippetText.Substring(0, 60) + "…";
+            var displayBlock = title + " > " + snippetText;
+            return "[" + displayBlock + "](../" + m.Id + "/index.md#" + anchor + ")";
         }
 
         private void NoteEditForm_FormClosing(object sender, FormClosingEventArgs e)

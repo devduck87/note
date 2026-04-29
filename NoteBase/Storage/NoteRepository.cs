@@ -135,11 +135,12 @@ namespace NoteBase.Storage
         /// <summary>
         /// 本文先頭の H1 をタイトルに同期する。
         /// 既に H1 があればそれを差し替え、無ければ先頭に追加する。
+        /// 改行は Windows 規約の \r\n に統一して書き出す（外部エディタ・TextBox との親和性のため）。
         /// </summary>
         private static string SyncTitleH1(string body, string title)
         {
             var safeTitle = title ?? "";
-            var src = (body ?? "").Replace("\r\n", "\n");
+            var src = (body ?? "").Replace("\r\n", "\n").Replace("\r", "\n");
             var lines = src.Split('\n');
 
             int i = 0;
@@ -148,11 +149,11 @@ namespace NoteBase.Storage
             if (i < lines.Length && lines[i].StartsWith("# "))
             {
                 lines[i] = "# " + safeTitle;
-                return string.Join("\n", lines);
+                return string.Join("\r\n", lines);
             }
 
             // 先頭に挿入
-            return "# " + safeTitle + "\n\n" + (body ?? "");
+            return "# " + safeTitle + "\r\n\r\n" + string.Join("\r\n", lines);
         }
     }
 }

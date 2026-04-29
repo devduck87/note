@@ -138,7 +138,8 @@ namespace NoteBase.UI
                 try
                 {
                     PopulateProperties(_currentMeta);
-                    txtBody.Text = body ?? "";
+                    // TextBox は \r\n でないと改行表示されないため正規化する
+                    txtBody.Text = NormalizeForTextBox(body);
                     txtBody.NoteDir = _paths.NoteDir(id);
                 }
                 finally { _suspendDirty = false; }
@@ -177,6 +178,12 @@ namespace NoteBase.UI
             lblPropInstanceOfValue.Text = m.InstanceOf ?? "";
             lblPropCreatedValue.Text = m.Created.ToString("yyyy-MM-dd HH:mm:ss");
             lblPropUpdatedValue.Text = m.Updated.ToString("yyyy-MM-dd HH:mm:ss");
+        }
+
+        private static string NormalizeForTextBox(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return s ?? "";
+            return s.Replace("\r\n", "\n").Replace("\r", "\n").Replace("\n", "\r\n");
         }
 
         private static string FormatSchedule(Schedule s)

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Windows.Forms;
 using NoteBase.Core;
@@ -8,13 +9,19 @@ using NoteBase.Storage;
 namespace NoteBase.UI
 {
     /// <summary>
-    /// メイン画面: ノート一覧 + プレビュー + 検索 + 新規作成。
+    /// メイン画面: ノート一覧 + プレビュー / 編集 + プロパティパネル。
     /// </summary>
     public partial class MainForm : Form
     {
         private readonly AppPaths _paths;
         private readonly NoteRepository _repo;
         private readonly TrashService _trash;
+
+        private string _currentNoteId;
+        private NoteMeta _currentMeta;
+        private bool _editMode;
+        private bool _dirty;
+        private bool _suspendDirty;
 
         public MainForm()
         {
@@ -24,6 +31,36 @@ namespace NoteBase.UI
             _paths.EnsureLayout();
             _trash = new TrashService(_paths);
             _repo = new NoteRepository(_paths, _trash);
+
+            InitPropertyControls();
+        }
+
+        private void InitPropertyControls()
+        {
+            cmbPropType.Items.AddRange(new object[]
+            {
+                NoteType.Memo, NoteType.Procedure, NoteType.Todo,
+                NoteType.Routine, NoteType.Checklist, NoteType.Daily,
+                NoteType.Project, NoteType.Log,
+            });
+            cmbPropType.Format += (s, e) =>
+            {
+                if (e.ListItem is NoteType)
+                    e.Value = ((NoteType)e.ListItem).DisplayName();
+            };
+
+            cmbPropStatus.Items.AddRange(new object[]
+            {
+                "(なし)", NoteStatus.Active, NoteStatus.Done,
+                NoteStatus.Pending, NoteStatus.Archived,
+            });
+            cmbPropStatus.Format += (s, e) =>
+            {
+                if (e.ListItem is NoteStatus)
+                    e.Value = ((NoteStatus)e.ListItem).ToWireString();
+            };
+
+            SetPropertyEditable(false);
         }
 
         private void MainForm_Load(object sender, EventArgs e)
@@ -31,8 +68,14 @@ namespace NoteBase.UI
             RefreshNoteList();
         }
 
+        // ============================================================
+        // ノート一覧 / 検索
+        // ============================================================
+
         private void RefreshNoteList()
         {
+            var prevSelectedId = _currentNoteId;
+
             lvNotes.BeginUpdate();
             try
             {
@@ -51,6 +94,9 @@ namespace NoteBase.UI
                     item.SubItems.Add(meta.Updated.ToString("yyyy-MM-dd HH:mm"));
                     item.Tag = meta.Id;
                     lvNotes.Items.Add(item);
+
+                    if (meta.Id == prevSelectedId)
+                        item.Selected = true;
                 }
             }
             finally
@@ -66,30 +112,90 @@ namespace NoteBase.UI
 
         private void LvNotes_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (lvNotes.SelectedItems.Count == 0)
-            {
-                webPreview.DocumentText = "";
-                return;
-            }
+            if (lvNotes.SelectedItems.Count == 0) return;
+            var newId = (string)lvNotes.SelectedItems[0].Tag;
+            if (newId == _currentNoteId) return;
 
-            var id = (string)lvNotes.SelectedItems[0].Tag;
+            if (!ConfirmDiscardIfDirty()) return;
+
+            LoadNote(newId);
+        }
+
+        // ============================================================
+        // ノート読み込み・表示
+        // ============================================================
+
+        private void LoadNote(string id)
+        {
             try
             {
                 string body;
-                _repo.Load(id, out body);
-                ShowPreview(id, body);
+                _currentMeta = _repo.Load(id, out body);
+                _currentNoteId = id;
+
+                // プロパティパネルへ反映
+                _suspendDirty = true;
+                try
+                {
+                    PopulateProperties(_currentMeta);
+                    txtBody.Text = body ?? "";
+                    txtBody.NoteDir = _paths.NoteDir(id);
+                }
+                finally { _suspendDirty = false; }
+
+                _dirty = false;
+
+                // 表示モードを反映
+                if (_editMode) ShowEditCenter();
+                else ShowPreviewCenter(id, body);
+
+                UpdateToolStripState();
             }
             catch (Exception ex)
             {
-                var safe = (ex.Message ?? "")
-                    .Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
-                webPreview.DocumentText =
-                    "<html><body><pre>読み込みエラー: " + safe + "</pre></body></html>";
+                ShowErrorInPreview("読み込みエラー: " + ex.Message);
             }
         }
 
-        private void ShowPreview(string id, string body)
+        private void PopulateProperties(NoteMeta m)
         {
+            txtPropTitle.Text = m.Title ?? "";
+            cmbPropType.SelectedItem = m.Type;
+            if (m.Status.HasValue)
+                cmbPropStatus.SelectedItem = m.Status.Value;
+            else
+                cmbPropStatus.SelectedIndex = 0;
+
+            txtPropTags.Text = m.Tags == null ? "" : string.Join(", ", m.Tags);
+            txtPropProject.Text = m.Project ?? "";
+
+            chkPropDue.Checked = m.Due.HasValue;
+            dtPropDue.Enabled = m.Due.HasValue;
+            if (m.Due.HasValue) dtPropDue.Value = m.Due.Value;
+
+            lblPropScheduleValue.Text = FormatSchedule(m.Schedule);
+            lblPropInstanceOfValue.Text = m.InstanceOf ?? "";
+            lblPropCreatedValue.Text = m.Created.ToString("yyyy-MM-dd HH:mm:ss");
+            lblPropUpdatedValue.Text = m.Updated.ToString("yyyy-MM-dd HH:mm:ss");
+        }
+
+        private static string FormatSchedule(Schedule s)
+        {
+            if (s == null) return "";
+            var parts = new List<string> { s.Frequency.ToWireString() };
+            if (s.Days != null && s.Days.Count > 0)
+                parts.Add("days=[" + string.Join(",", s.Days) + "]");
+            if (s.DayOfMonth.HasValue)
+                parts.Add("dom=" + s.DayOfMonth.Value);
+            parts.Add(s.Enabled ? "enabled" : "disabled");
+            return string.Join(" ", parts);
+        }
+
+        private void ShowPreviewCenter(string id, string body)
+        {
+            txtBody.Visible = false;
+            webPreview.Visible = true;
+
             var html = MarkdownToHtml.Convert(body);
             var noteDir = _paths.NoteDir(id);
             var baseUrl = "file:///" + noteDir.Replace('\\', '/').TrimEnd('/') + "/";
@@ -113,8 +219,183 @@ namespace NoteBase.UI
             webPreview.DocumentText = doc;
         }
 
+        private void ShowEditCenter()
+        {
+            webPreview.Visible = false;
+            txtBody.Visible = true;
+            txtBody.Focus();
+        }
+
+        private void ShowErrorInPreview(string msg)
+        {
+            webPreview.Visible = true;
+            txtBody.Visible = false;
+            var safe = (msg ?? "").Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
+            webPreview.DocumentText = "<html><body><pre>" + safe + "</pre></body></html>";
+        }
+
+        // ============================================================
+        // 編集モード切替・保存
+        // ============================================================
+
+        private void BtnEdit_Click(object sender, EventArgs e)
+        {
+            if (_currentMeta == null) return;
+            EnterEditMode();
+        }
+
+        private void EnterEditMode()
+        {
+            _editMode = true;
+            SetPropertyEditable(true);
+            ShowEditCenter();
+            UpdateToolStripState();
+        }
+
+        private void ExitEditMode()
+        {
+            _editMode = false;
+            SetPropertyEditable(false);
+            // 表示はプレビューに戻す
+            if (_currentMeta != null)
+            {
+                ShowPreviewCenter(_currentNoteId, txtBody.Text);
+            }
+            UpdateToolStripState();
+        }
+
+        private void SetPropertyEditable(bool editable)
+        {
+            txtPropTitle.ReadOnly = !editable;
+            cmbPropType.Enabled = editable;
+            cmbPropStatus.Enabled = editable;
+            txtPropTags.ReadOnly = !editable;
+            txtPropProject.ReadOnly = !editable;
+            chkPropDue.Enabled = editable;
+            dtPropDue.Enabled = editable && chkPropDue.Checked;
+        }
+
+        private void UpdateToolStripState()
+        {
+            btnEdit.Visible = !_editMode;
+            btnSave.Visible = _editMode;
+            btnCancel.Visible = _editMode;
+            btnSave.Text = _dirty ? "保存* (Ctrl+S)" : "保存 (Ctrl+S)";
+        }
+
+        private void BtnSave_Click(object sender, EventArgs e)
+        {
+            if (_currentMeta == null) return;
+            if (string.IsNullOrWhiteSpace(txtPropTitle.Text))
+            {
+                MessageBox.Show(this, "タイトルを入力してください。", "確認",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                txtPropTitle.Focus();
+                return;
+            }
+
+            ApplyPropertiesToMeta(_currentMeta);
+
+            try
+            {
+                _currentMeta = _repo.SaveExisting(_currentMeta, txtBody.Text);
+                _dirty = false;
+                ExitEditMode();
+                RefreshNoteList();
+                LoadNote(_currentMeta.Id); // updated 等を再反映
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "保存に失敗しました: " + ex.Message, "エラー",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void BtnCancel_Click(object sender, EventArgs e)
+        {
+            if (!ConfirmDiscardIfDirty()) return;
+            // 元の内容を再読み込み
+            if (_currentNoteId != null)
+            {
+                _editMode = false;
+                LoadNote(_currentNoteId);
+            }
+            UpdateToolStripState();
+        }
+
+        private void ApplyPropertiesToMeta(NoteMeta m)
+        {
+            m.Title = txtPropTitle.Text.Trim();
+            if (cmbPropType.SelectedItem is NoteType)
+                m.Type = (NoteType)cmbPropType.SelectedItem;
+
+            if (cmbPropStatus.SelectedItem is NoteStatus)
+                m.Status = (NoteStatus)cmbPropStatus.SelectedItem;
+            else
+                m.Status = null;
+
+            m.Tags = (txtPropTags.Text ?? "")
+                .Split(new[] { ',', '、' })
+                .Select(t => t.Trim())
+                .Where(t => t.Length > 0)
+                .ToList();
+
+            var proj = (txtPropProject.Text ?? "").Trim();
+            m.Project = string.IsNullOrEmpty(proj) ? null : proj;
+
+            m.Due = chkPropDue.Checked ? (DateTime?)dtPropDue.Value.Date : null;
+        }
+
+        // ============================================================
+        // dirty 追跡
+        // ============================================================
+
+        private void TxtBody_TextChanged(object sender, EventArgs e)
+        {
+            MarkDirty();
+        }
+
+        private void PropertyValueChanged(object sender, EventArgs e)
+        {
+            MarkDirty();
+        }
+
+        private void ChkPropDue_CheckedChanged(object sender, EventArgs e)
+        {
+            dtPropDue.Enabled = _editMode && chkPropDue.Checked;
+            MarkDirty();
+        }
+
+        private void MarkDirty()
+        {
+            if (_suspendDirty) return;
+            if (!_editMode) return;
+            _dirty = true;
+            UpdateToolStripState();
+        }
+
+        private bool ConfirmDiscardIfDirty()
+        {
+            if (!_dirty) return true;
+            var r = MessageBox.Show(this,
+                "未保存の変更があります。破棄しますか？",
+                "確認", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (r == DialogResult.Yes)
+            {
+                _dirty = false;
+                _editMode = false;
+                return true;
+            }
+            return false;
+        }
+
+        // ============================================================
+        // 新規作成
+        // ============================================================
+
         private void BtnNew_Click(object sender, EventArgs e)
         {
+            if (!ConfirmDiscardIfDirty()) return;
             using (var form = new NoteEditForm(_repo))
             {
                 if (form.ShowDialog(this) == DialogResult.OK)
@@ -124,6 +405,10 @@ namespace NoteBase.UI
             }
         }
 
+        // ============================================================
+        // フォームレベルイベント
+        // ============================================================
+
         private void MainForm_KeyDown(object sender, KeyEventArgs e)
         {
             if (e.Control && e.KeyCode == Keys.N)
@@ -131,6 +416,28 @@ namespace NoteBase.UI
                 BtnNew_Click(this, EventArgs.Empty);
                 e.Handled = true;
             }
+            else if (e.Control && e.KeyCode == Keys.E)
+            {
+                if (!_editMode && _currentMeta != null)
+                {
+                    EnterEditMode();
+                    e.Handled = true;
+                }
+            }
+            else if (e.Control && e.KeyCode == Keys.S)
+            {
+                if (_editMode)
+                {
+                    BtnSave_Click(this, EventArgs.Empty);
+                    e.Handled = true;
+                }
+            }
+        }
+
+        private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            if (_dirty && !ConfirmDiscardIfDirty())
+                e.Cancel = true;
         }
     }
 }

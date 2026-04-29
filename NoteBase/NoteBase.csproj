@@ -58,6 +58,9 @@
     <Compile Include="Storage\MetaJson.cs" />
     <Compile Include="Storage\NoteRepository.cs" />
     <Compile Include="Storage\TrashService.cs" />
+    <Compile Include="UI\Controls\MarkdownTextBox.cs">
+      <SubType>Component</SubType>
+    </Compile>
     <Compile Include="UI\MainForm.cs">
       <SubType>Form</SubType>
     </Compile>

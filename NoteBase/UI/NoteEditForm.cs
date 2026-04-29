@@ -10,6 +10,7 @@ namespace NoteBase.UI
     /// 新規ノート入力 UI。
     /// type 選択直後にドラフトフォルダを作成し、保存時にタイトル確定でフォルダを rename する。
     /// キャンセル時はフォルダごと trash へ移動する。
+    /// 画像貼り付け / DnD は MarkdownTextBox が担当する。
     /// </summary>
     public partial class NoteEditForm : Form
     {
@@ -24,7 +25,6 @@ namespace NoteBase.UI
             _imageStore = new ImageStore();
             InitializeComponent();
 
-            // type ComboBox 初期化
             cmbType.Items.AddRange(new object[]
             {
                 NoteType.Memo,
@@ -56,6 +56,7 @@ namespace NoteBase.UI
             _saved = false;
             var type = (NoteType)cmbType.SelectedItem;
             _draft = _repo.CreateDraft(type);
+            txtBody.NoteDir = _repo.GetNoteDir(_draft.Id);
         }
 
         private void BtnAddImage_Click(object sender, EventArgs e)
@@ -69,44 +70,10 @@ namespace NoteBase.UI
                 {
                     foreach (var f in dialog.FileNames.Where(ImageStore.IsImageFile))
                     {
-                        var rel = _imageStore.SaveDroppedImage(GetNoteDir(), f);
+                        var rel = _imageStore.SaveDroppedImage(_repo.GetNoteDir(_draft.Id), f);
                         InsertAtCursor("![](" + rel + ")\n");
                     }
                 }
-            }
-        }
-
-        private void TxtBody_KeyDown(object sender, KeyEventArgs e)
-        {
-            if (e.Control && e.KeyCode == Keys.V && Clipboard.ContainsImage())
-            {
-                using (var img = Clipboard.GetImage())
-                {
-                    if (img != null)
-                    {
-                        var rel = _imageStore.SavePastedImage(GetNoteDir(), img);
-                        InsertAtCursor("![](" + rel + ")\n");
-                    }
-                }
-                e.Handled = true;
-                e.SuppressKeyPress = true;
-            }
-        }
-
-        private void TxtBody_DragEnter(object sender, DragEventArgs e)
-        {
-            if (e.Data.GetDataPresent(DataFormats.FileDrop))
-                e.Effect = DragDropEffects.Copy;
-        }
-
-        private void TxtBody_DragDrop(object sender, DragEventArgs e)
-        {
-            var files = e.Data.GetData(DataFormats.FileDrop) as string[];
-            if (files == null) return;
-            foreach (var f in files.Where(ImageStore.IsImageFile))
-            {
-                var rel = _imageStore.SaveDroppedImage(GetNoteDir(), f);
-                InsertAtCursor("![](" + rel + ")\n");
             }
         }
 
@@ -117,11 +84,6 @@ namespace NoteBase.UI
             txtBody.SelectionStart = pos + text.Length;
             txtBody.SelectionLength = 0;
             txtBody.Focus();
-        }
-
-        private string GetNoteDir()
-        {
-            return _repo.GetNoteDir(_draft.Id);
         }
 
         private void BtnSave_Click(object sender, EventArgs e)
@@ -142,7 +104,7 @@ namespace NoteBase.UI
 
             try
             {
-                _draft = _repo.Save(_draft, txtBody.Text);
+                _draft = _repo.SaveNew(_draft, txtBody.Text);
                 _saved = true;
                 this.DialogResult = DialogResult.OK;
                 Close();

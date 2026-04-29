@@ -53,14 +53,13 @@ namespace NoteBase.Storage
         }
 
         /// <summary>
-        /// meta + 本文を確定保存する。タイトル変更があればフォルダを rename する。
+        /// 新規ノートの初回確定保存。タイトルから slug を計算してフォルダ名を確定する。
         /// 戻り値: 確定後の NoteMeta（Id が変わっている場合あり）。
         /// </summary>
-        public NoteMeta Save(NoteMeta meta, string body)
+        public NoteMeta SaveNew(NoteMeta meta, string body)
         {
             if (meta == null) throw new ArgumentNullException("meta");
 
-            // タイトルから新しい id を計算
             var newId = NoteId.ReplaceSlug(meta.Id, meta.Title);
             if (newId != meta.Id)
             {
@@ -71,7 +70,20 @@ namespace NoteBase.Storage
                 Directory.Move(_paths.NoteDir(meta.Id), _paths.NoteDir(newId));
                 meta.Id = newId;
             }
+            return WriteCommon(meta, body);
+        }
 
+        /// <summary>
+        /// 既存ノートの上書き保存。フォルダ名（ID）は変更しない。
+        /// </summary>
+        public NoteMeta SaveExisting(NoteMeta meta, string body)
+        {
+            if (meta == null) throw new ArgumentNullException("meta");
+            return WriteCommon(meta, body);
+        }
+
+        private NoteMeta WriteCommon(NoteMeta meta, string body)
+        {
             meta.Updated = DateTime.Now;
             body = SyncTitleH1(body, meta.Title);
 

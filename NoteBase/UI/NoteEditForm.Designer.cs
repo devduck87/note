@@ -18,7 +18,7 @@ namespace NoteBase.UI
         private System.Windows.Forms.Label lblTags;
         private System.Windows.Forms.TextBox txtTags;
         private System.Windows.Forms.Label lblBody;
-        private System.Windows.Forms.TextBox txtBody;
+        private NoteBase.UI.Controls.MarkdownTextBox txtBody;
         private System.Windows.Forms.Button btnAddImage;
         private System.Windows.Forms.Button btnSave;
         private System.Windows.Forms.Button btnCancel;
@@ -33,7 +33,7 @@ namespace NoteBase.UI
             this.lblTags = new System.Windows.Forms.Label();
             this.txtTags = new System.Windows.Forms.TextBox();
             this.lblBody = new System.Windows.Forms.Label();
-            this.txtBody = new System.Windows.Forms.TextBox();
+            this.txtBody = new NoteBase.UI.Controls.MarkdownTextBox();
             this.btnAddImage = new System.Windows.Forms.Button();
             this.btnSave = new System.Windows.Forms.Button();
             this.btnCancel = new System.Windows.Forms.Button();
@@ -79,22 +79,13 @@ namespace NoteBase.UI
             this.lblBody.Location = new System.Drawing.Point(12, 115);
             this.lblBody.Size = new System.Drawing.Size(60, 18);
 
-            // txtBody
+            // txtBody (MarkdownTextBox)
             this.txtBody.Location = new System.Drawing.Point(12, 138);
             this.txtBody.Size = new System.Drawing.Size(568, 270);
-            this.txtBody.Multiline = true;
-            this.txtBody.AcceptsTab = true;
-            this.txtBody.AcceptsReturn = true;
-            this.txtBody.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
-            this.txtBody.Font = new System.Drawing.Font("Consolas", 10F);
             this.txtBody.Anchor = System.Windows.Forms.AnchorStyles.Top
                 | System.Windows.Forms.AnchorStyles.Left
                 | System.Windows.Forms.AnchorStyles.Right
                 | System.Windows.Forms.AnchorStyles.Bottom;
-            this.txtBody.AllowDrop = true;
-            this.txtBody.KeyDown += new System.Windows.Forms.KeyEventHandler(this.TxtBody_KeyDown);
-            this.txtBody.DragEnter += new System.Windows.Forms.DragEventHandler(this.TxtBody_DragEnter);
-            this.txtBody.DragDrop += new System.Windows.Forms.DragEventHandler(this.TxtBody_DragDrop);
 
             // btnAddImage
             this.btnAddImage.Text = "画像追加";

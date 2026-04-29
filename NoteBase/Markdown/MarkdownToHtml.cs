@@ -24,7 +24,7 @@ namespace NoteBase.Markdown
 
         public static string Convert(string markdown)
         {
-            return Convert(markdown, null);
+            return Convert(markdown, null, null);
         }
 
         /// <summary>
@@ -32,9 +32,14 @@ namespace NoteBase.Markdown
         /// </summary>
         /// <param name="markdown">変換対象</param>
         /// <param name="titleResolver">[[Title]] 用のタイトル→ノートID解決関数 (null 可)</param>
-        public static string Convert(string markdown, Func<string, string> titleResolver)
+        /// <param name="baseUrl">画像・リンクの相対パス解決用のベース URL (例: "file:///c:/.../notes/&lt;id&gt;/", null 可)</param>
+        public static string Convert(string markdown, Func<string, string> titleResolver, string baseUrl = null)
         {
             if (string.IsNullOrEmpty(markdown)) return "";
+
+            Uri baseUri = null;
+            if (!string.IsNullOrEmpty(baseUrl))
+                Uri.TryCreate(baseUrl, UriKind.Absolute, out baseUri);
 
             var normalized = markdown.Replace("\r\n", "\n").Replace("\r", "\n");
             var lines = normalized.Split('\n');
@@ -91,7 +96,7 @@ namespace NoteBase.Markdown
                 {
                     CloseLists(sb, ref inUl, ref inOl);
                     var level = hMatch.Groups[1].Value.Length;
-                    var content = ProcessInline(hMatch.Groups[2].Value, titleResolver);
+                    var content = ProcessInline(hMatch.Groups[2].Value, titleResolver, baseUri);
                     sb.Append("<h").Append(level).Append(">")
                       .Append(content)
                       .Append("</h").Append(level).Append(">\n");
@@ -107,7 +112,7 @@ namespace NoteBase.Markdown
                     if (!inUl) { sb.Append("<ul class=\"task-list\">\n"); inUl = true; }
                     var checkedAttr = (taskMatch.Groups[1].Value.ToLowerInvariant() == "x")
                         ? " checked" : "";
-                    var content = ProcessInline(taskMatch.Groups[2].Value, titleResolver);
+                    var content = ProcessInline(taskMatch.Groups[2].Value, titleResolver, baseUri);
                     sb.Append("<li><input type=\"checkbox\" disabled")
                       .Append(checkedAttr)
                       .Append("/> ")
@@ -124,7 +129,7 @@ namespace NoteBase.Markdown
                     if (inOl) { sb.Append("</ol>\n"); inOl = false; }
                     if (!inUl) { sb.Append("<ul>\n"); inUl = true; }
                     sb.Append("<li>")
-                      .Append(ProcessInline(ulMatch.Groups[1].Value, titleResolver))
+                      .Append(ProcessInline(ulMatch.Groups[1].Value, titleResolver, baseUri))
                       .Append("</li>\n");
                     i++;
                     continue;
@@ -137,7 +142,7 @@ namespace NoteBase.Markdown
                     if (inUl) { sb.Append("</ul>\n"); inUl = false; }
                     if (!inOl) { sb.Append("<ol>\n"); inOl = true; }
                     sb.Append("<li>")
-                      .Append(ProcessInline(olMatch.Groups[1].Value, titleResolver))
+                      .Append(ProcessInline(olMatch.Groups[1].Value, titleResolver, baseUri))
                       .Append("</li>\n");
                     i++;
                     continue;
@@ -146,7 +151,7 @@ namespace NoteBase.Markdown
                 // 段落（連続する非空行は <br/> で結合）
                 CloseLists(sb, ref inUl, ref inOl);
                 sb.Append("<p>");
-                sb.Append(ProcessInline(line, titleResolver));
+                sb.Append(ProcessInline(line, titleResolver, baseUri));
                 i++;
                 while (i < lines.Length && !string.IsNullOrWhiteSpace(lines[i])
                     && !lines[i].StartsWith("#")
@@ -157,7 +162,7 @@ namespace NoteBase.Markdown
                     && !HrRe.IsMatch(lines[i].Trim()))
                 {
                     sb.Append("<br/>");
-                    sb.Append(ProcessInline(lines[i], titleResolver));
+                    sb.Append(ProcessInline(lines[i], titleResolver, baseUri));
                     i++;
                 }
                 sb.Append("</p>\n");
@@ -173,11 +178,23 @@ namespace NoteBase.Markdown
             if (inOl) { sb.Append("</ol>\n"); inOl = false; }
         }
 
+        private static string ResolveUrl(string url, Uri baseUri)
+        {
+            if (baseUri == null || string.IsNullOrEmpty(url)) return url;
+            // 既に絶対 URI ならそのまま (http(s)://, file://, mailto: など)
+            Uri abs;
+            if (Uri.TryCreate(url, UriKind.Absolute, out abs)) return url;
+            // 相対 URI を baseUri の下で解決
+            Uri resolved;
+            if (Uri.TryCreate(baseUri, url, out resolved)) return resolved.AbsoluteUri;
+            return url;
+        }
+
         /// <summary>
         /// インライン要素を処理する。
         /// 順序: コード → 画像 → wiki link → リンク → 強調 → 斜体 → 通常文字。
         /// </summary>
-        private static string ProcessInline(string text, Func<string, string> titleResolver)
+        private static string ProcessInline(string text, Func<string, string> titleResolver, Uri baseUri)
         {
             if (string.IsNullOrEmpty(text)) return "";
 
@@ -205,7 +222,7 @@ namespace NoteBase.Markdown
                     if (m.Success)
                     {
                         var alt = EscapeHtml(m.Groups[1].Value);
-                        var src = EscapeHtml(m.Groups[2].Value);
+                        var src = EscapeHtml(ResolveUrl(m.Groups[2].Value, baseUri));
                         sb.Append("<img src=\"").Append(src)
                           .Append("\" alt=\"").Append(alt).Append("\"/>");
                         i += m.Length;
@@ -236,7 +253,8 @@ namespace NoteBase.Markdown
                         string id = (titleResolver != null) ? titleResolver(title) : null;
                         if (!string.IsNullOrEmpty(id))
                         {
-                            sb.Append("<a href=\"../").Append(EscapeHtml(id)).Append("/index.md\">")
+                            var wikiHref = EscapeHtml(ResolveUrl("../" + id + "/index.md", baseUri));
+                            sb.Append("<a href=\"").Append(wikiHref).Append("\">")
                               .Append(EscapeHtml(alias ?? title))
                               .Append("</a>");
                         }
@@ -258,8 +276,8 @@ namespace NoteBase.Markdown
                     var m = LinkRe.Match(text.Substring(i));
                     if (m.Success)
                     {
-                        var label = ProcessInline(m.Groups[1].Value, titleResolver);
-                        var url = EscapeHtml(m.Groups[2].Value);
+                        var label = ProcessInline(m.Groups[1].Value, titleResolver, baseUri);
+                        var url = EscapeHtml(ResolveUrl(m.Groups[2].Value, baseUri));
                         sb.Append("<a href=\"").Append(url).Append("\">")
                           .Append(label).Append("</a>");
                         i += m.Length;
@@ -274,7 +292,7 @@ namespace NoteBase.Markdown
                     if (end > i)
                     {
                         var inner = text.Substring(i + 2, end - i - 2);
-                        sb.Append("<strong>").Append(ProcessInline(inner, titleResolver)).Append("</strong>");
+                        sb.Append("<strong>").Append(ProcessInline(inner, titleResolver, baseUri)).Append("</strong>");
                         i = end + 2;
                         continue;
                     }
@@ -287,7 +305,7 @@ namespace NoteBase.Markdown
                     if (end > i)
                     {
                         var inner = text.Substring(i + 1, end - i - 1);
-                        sb.Append("<em>").Append(ProcessInline(inner, titleResolver)).Append("</em>");
+                        sb.Append("<em>").Append(ProcessInline(inner, titleResolver, baseUri)).Append("</em>");
                         i = end + 1;
                         continue;
                     }

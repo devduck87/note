@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Windows.Forms;
 using NoteBase.Core;
 using NoteBase.Markdown;
@@ -25,6 +26,8 @@ namespace NoteBase.UI
         private bool _dirty;
         private bool _suspendDirty;
         private Dictionary<string, string> _titleToIdCache;
+        private readonly string _previewTempPath;
+        private static readonly UTF8Encoding Utf8NoBom = new UTF8Encoding(false);
 
         public MainForm()
         {
@@ -34,6 +37,7 @@ namespace NoteBase.UI
             _paths.EnsureLayout();
             _trash = new TrashService(_paths);
             _repo = new NoteRepository(_paths, _trash);
+            _previewTempPath = Path.Combine(Path.GetTempPath(), "notebase_preview.html");
 
             InitPropertyControls();
 
@@ -209,12 +213,11 @@ namespace NoteBase.UI
             txtBody.Visible = false;
             webPreview.Visible = true;
 
-            var html = MarkdownToHtml.Convert(body, ResolveTitleToId);
             var noteDir = _paths.NoteDir(id);
             var baseUrl = "file:///" + noteDir.Replace('\\', '/').TrimEnd('/') + "/";
+            var html = MarkdownToHtml.Convert(body, ResolveTitleToId, baseUrl);
 
             var doc = "<!DOCTYPE html><html><head>"
-                + "<base href=\"" + baseUrl + "\"/>"
                 + "<meta charset=\"utf-8\"/>"
                 + "<style>"
                 + "body{font-family:'Segoe UI','Yu Gothic UI','Meiryo',sans-serif;font-size:11pt;padding:12px;color:#222;}"
@@ -231,7 +234,12 @@ namespace NoteBase.UI
                 + "</style></head><body>"
                 + html
                 + "</body></html>";
-            webPreview.DocumentText = doc;
+
+            // DocumentText (about:blank) からの file:// リンクは
+            // IE のセキュリティ制約で遷移できないため、
+            // 一時ファイル経由で Navigate して URL を file:// にする。
+            File.WriteAllText(_previewTempPath, doc, Utf8NoBom);
+            webPreview.Navigate(_previewTempPath);
         }
 
         /// <summary>
@@ -510,8 +518,11 @@ namespace NoteBase.UI
             if (uri == null) return;
 
             var url = uri.AbsoluteUri ?? "";
-            // 初期描画 (DocumentText 設定時) は about:blank で来るので素通し
+            // 初期 / 自前プレビューファイルへの Navigate は素通し
             if (url == "about:blank" || string.IsNullOrEmpty(url)) return;
+            if (uri.IsFile && !string.IsNullOrEmpty(_previewTempPath)
+                && string.Equals(uri.LocalPath, _previewTempPath, StringComparison.OrdinalIgnoreCase))
+                return;
 
             if (uri.IsFile)
             {

@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 using NoteBase.Core;
@@ -22,6 +24,7 @@ namespace NoteBase.UI
         private bool _editMode;
         private bool _dirty;
         private bool _suspendDirty;
+        private Dictionary<string, string> _titleToIdCache;
 
         public MainForm()
         {
@@ -33,6 +36,8 @@ namespace NoteBase.UI
             _repo = new NoteRepository(_paths, _trash);
 
             InitPropertyControls();
+
+            webPreview.Navigating += WebPreview_Navigating;
         }
 
         private void InitPropertyControls()
@@ -74,6 +79,7 @@ namespace NoteBase.UI
 
         private void RefreshNoteList()
         {
+            _titleToIdCache = null; // 一覧更新時に title→id キャッシュを無効化
             var prevSelectedId = _currentNoteId;
 
             lvNotes.BeginUpdate();
@@ -203,7 +209,7 @@ namespace NoteBase.UI
             txtBody.Visible = false;
             webPreview.Visible = true;
 
-            var html = MarkdownToHtml.Convert(body);
+            var html = MarkdownToHtml.Convert(body, ResolveTitleToId);
             var noteDir = _paths.NoteDir(id);
             var baseUrl = "file:///" + noteDir.Replace('\\', '/').TrimEnd('/') + "/";
 
@@ -220,10 +226,34 @@ namespace NoteBase.UI
                 + "img{max-width:100%;border:1px solid #ddd;}"
                 + "ul.task-list{list-style:none;padding-left:1em;}"
                 + "ul.task-list li input{margin-right:6px;}"
+                + ".unresolved-link{color:#c00;}"
+                + "a{color:#0a58ca;}"
                 + "</style></head><body>"
                 + html
                 + "</body></html>";
             webPreview.DocumentText = doc;
+        }
+
+        /// <summary>
+        /// [[Title]] の解決用。title から ID を返す。一致なしは null。
+        /// </summary>
+        private string ResolveTitleToId(string title)
+        {
+            if (string.IsNullOrEmpty(title)) return null;
+            if (_titleToIdCache == null) BuildTitleToIdCache();
+            string id;
+            return _titleToIdCache.TryGetValue(title, out id) ? id : null;
+        }
+
+        private void BuildTitleToIdCache()
+        {
+            _titleToIdCache = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var m in _repo.LoadAll())
+            {
+                if (string.IsNullOrEmpty(m.Title)) continue;
+                if (_titleToIdCache.ContainsKey(m.Title)) continue; // 重複は最初に見つけた方を採用
+                _titleToIdCache[m.Title] = m.Id;
+            }
         }
 
         private void ShowEditCenter()
@@ -439,6 +469,105 @@ namespace NoteBase.UI
                     e.Handled = true;
                 }
             }
+            else if (e.Control && e.KeyCode == Keys.L)
+            {
+                if (_editMode)
+                {
+                    InsertNoteLinkAtCursor();
+                    e.Handled = true;
+                }
+            }
+        }
+
+        // ============================================================
+        // ノートリンク挿入 (Ctrl+L)
+        // ============================================================
+
+        private void InsertNoteLinkAtCursor()
+        {
+            using (var picker = new NotePickerDialog(_repo, _currentNoteId))
+            {
+                if (picker.ShowDialog(this) == DialogResult.OK && picker.SelectedMeta != null)
+                {
+                    var m = picker.SelectedMeta;
+                    var snippet = "[" + (m.Title ?? "") + "](../" + m.Id + "/index.md)";
+                    int pos = txtBody.SelectionStart;
+                    txtBody.Text = txtBody.Text.Insert(pos, snippet);
+                    txtBody.SelectionStart = pos + snippet.Length;
+                    txtBody.SelectionLength = 0;
+                    txtBody.Focus();
+                }
+            }
+        }
+
+        // ============================================================
+        // プレビューのリンクナビゲーション
+        // ============================================================
+
+        private void WebPreview_Navigating(object sender, WebBrowserNavigatingEventArgs e)
+        {
+            var uri = e.Url;
+            if (uri == null) return;
+
+            var url = uri.AbsoluteUri ?? "";
+            // 初期描画 (DocumentText 設定時) は about:blank で来るので素通し
+            if (url == "about:blank" || string.IsNullOrEmpty(url)) return;
+
+            if (uri.IsFile)
+            {
+                var path = uri.LocalPath;
+                // .md なら他ノートに遷移
+                if (path != null && path.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+                {
+                    e.Cancel = true;
+                    var dir = Path.GetDirectoryName(path);
+                    if (!string.IsNullOrEmpty(dir))
+                    {
+                        var id = Path.GetFileName(dir);
+                        // UI スレッドへ非同期投入 (Navigating ハンドラ内で再ナビゲーションすると詰まる)
+                        BeginInvoke((Action)(() => OpenNoteFromLink(id)));
+                    }
+                    return;
+                }
+                // それ以外 (画像など) は素通し
+                return;
+            }
+
+            if (uri.Scheme == "http" || uri.Scheme == "https")
+            {
+                e.Cancel = true;
+                try { Process.Start(url); } catch { /* ignore */ }
+                return;
+            }
+
+            // それ以外のスキームはブロック
+            e.Cancel = true;
+        }
+
+        private void OpenNoteFromLink(string id)
+        {
+            if (string.IsNullOrEmpty(id)) return;
+            // 該当ノートが存在するか確認
+            if (!Directory.Exists(_paths.NoteDir(id)))
+            {
+                MessageBox.Show(this, "リンク先のノートが見つかりません: " + id,
+                    "情報", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            if (!ConfirmDiscardIfDirty()) return;
+            _editMode = false;
+            UpdateToolStripState();
+            // 一覧の選択も同期
+            foreach (ListViewItem item in lvNotes.Items)
+            {
+                if ((string)item.Tag == id)
+                {
+                    item.Selected = true;
+                    item.EnsureVisible();
+                    break;
+                }
+            }
+            LoadNote(id);
         }
 
         private void MainForm_FormClosing(object sender, FormClosingEventArgs e)

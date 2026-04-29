@@ -115,6 +115,8 @@ namespace NoteBase.UI
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(594, 460);
             this.MinimumSize = new System.Drawing.Size(500, 400);
+            this.KeyPreview = true;
+            this.KeyDown += new System.Windows.Forms.KeyEventHandler(this.NoteEditForm_KeyDown);
             this.Controls.Add(this.lblType);
             this.Controls.Add(this.cmbType);
             this.Controls.Add(this.lblTitle);

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -5,10 +6,10 @@ using System.Text.RegularExpressions;
 namespace NoteBase.Markdown
 {
     /// <summary>
-    /// Markdown を HTML に変換する。GFM サブセット対応:
+    /// Markdown を HTML に変換する。GFM サブセット + 独自 wiki link [[Title]] に対応:
     /// 見出し / 段落 / 箇条書き / 番号付きリスト / タスクリスト /
     /// 強調 / 斜体 / インラインコード / コードブロック (フェンス) /
-    /// 画像 / リンク / 水平線。
+    /// 画像 / リンク / 水平線 / wiki link。
     /// テーブル・引用・脚注などは Phase 2 以降で対応する。
     /// </summary>
     public static class MarkdownToHtml
@@ -22,6 +23,16 @@ namespace NoteBase.Markdown
         private static readonly Regex LinkRe = new Regex(@"^\[([^\]]+)\]\(([^)]+)\)", RegexOptions.Compiled);
 
         public static string Convert(string markdown)
+        {
+            return Convert(markdown, null);
+        }
+
+        /// <summary>
+        /// Markdown を HTML に変換する。
+        /// </summary>
+        /// <param name="markdown">変換対象</param>
+        /// <param name="titleResolver">[[Title]] 用のタイトル→ノートID解決関数 (null 可)</param>
+        public static string Convert(string markdown, Func<string, string> titleResolver)
         {
             if (string.IsNullOrEmpty(markdown)) return "";
 
@@ -80,7 +91,7 @@ namespace NoteBase.Markdown
                 {
                     CloseLists(sb, ref inUl, ref inOl);
                     var level = hMatch.Groups[1].Value.Length;
-                    var content = ProcessInline(hMatch.Groups[2].Value);
+                    var content = ProcessInline(hMatch.Groups[2].Value, titleResolver);
                     sb.Append("<h").Append(level).Append(">")
                       .Append(content)
                       .Append("</h").Append(level).Append(">\n");
@@ -96,7 +107,7 @@ namespace NoteBase.Markdown
                     if (!inUl) { sb.Append("<ul class=\"task-list\">\n"); inUl = true; }
                     var checkedAttr = (taskMatch.Groups[1].Value.ToLowerInvariant() == "x")
                         ? " checked" : "";
-                    var content = ProcessInline(taskMatch.Groups[2].Value);
+                    var content = ProcessInline(taskMatch.Groups[2].Value, titleResolver);
                     sb.Append("<li><input type=\"checkbox\" disabled")
                       .Append(checkedAttr)
                       .Append("/> ")
@@ -113,7 +124,7 @@ namespace NoteBase.Markdown
                     if (inOl) { sb.Append("</ol>\n"); inOl = false; }
                     if (!inUl) { sb.Append("<ul>\n"); inUl = true; }
                     sb.Append("<li>")
-                      .Append(ProcessInline(ulMatch.Groups[1].Value))
+                      .Append(ProcessInline(ulMatch.Groups[1].Value, titleResolver))
                       .Append("</li>\n");
                     i++;
                     continue;
@@ -126,7 +137,7 @@ namespace NoteBase.Markdown
                     if (inUl) { sb.Append("</ul>\n"); inUl = false; }
                     if (!inOl) { sb.Append("<ol>\n"); inOl = true; }
                     sb.Append("<li>")
-                      .Append(ProcessInline(olMatch.Groups[1].Value))
+                      .Append(ProcessInline(olMatch.Groups[1].Value, titleResolver))
                       .Append("</li>\n");
                     i++;
                     continue;
@@ -135,7 +146,7 @@ namespace NoteBase.Markdown
                 // 段落（連続する非空行は <br/> で結合）
                 CloseLists(sb, ref inUl, ref inOl);
                 sb.Append("<p>");
-                sb.Append(ProcessInline(line));
+                sb.Append(ProcessInline(line, titleResolver));
                 i++;
                 while (i < lines.Length && !string.IsNullOrWhiteSpace(lines[i])
                     && !lines[i].StartsWith("#")
@@ -146,7 +157,7 @@ namespace NoteBase.Markdown
                     && !HrRe.IsMatch(lines[i].Trim()))
                 {
                     sb.Append("<br/>");
-                    sb.Append(ProcessInline(lines[i]));
+                    sb.Append(ProcessInline(lines[i], titleResolver));
                     i++;
                 }
                 sb.Append("</p>\n");
@@ -164,9 +175,9 @@ namespace NoteBase.Markdown
 
         /// <summary>
         /// インライン要素を処理する。
-        /// 順序: コード → 画像 → リンク → 強調 → 斜体 → 通常文字。
+        /// 順序: コード → 画像 → wiki link → リンク → 強調 → 斜体 → 通常文字。
         /// </summary>
-        private static string ProcessInline(string text)
+        private static string ProcessInline(string text, Func<string, string> titleResolver)
         {
             if (string.IsNullOrEmpty(text)) return "";
 
@@ -202,13 +213,52 @@ namespace NoteBase.Markdown
                     }
                 }
 
+                // wiki link [[Title]] または [[Title|alias]]
+                if (text[i] == '[' && i + 1 < text.Length && text[i + 1] == '[')
+                {
+                    int end = text.IndexOf("]]", i + 2);
+                    if (end > i + 1)
+                    {
+                        var inner = text.Substring(i + 2, end - i - 2);
+                        string title, alias;
+                        var pipeIdx = inner.IndexOf('|');
+                        if (pipeIdx >= 0)
+                        {
+                            title = inner.Substring(0, pipeIdx).Trim();
+                            alias = inner.Substring(pipeIdx + 1).Trim();
+                        }
+                        else
+                        {
+                            title = inner.Trim();
+                            alias = null;
+                        }
+
+                        string id = (titleResolver != null) ? titleResolver(title) : null;
+                        if (!string.IsNullOrEmpty(id))
+                        {
+                            sb.Append("<a href=\"../").Append(EscapeHtml(id)).Append("/index.md\">")
+                              .Append(EscapeHtml(alias ?? title))
+                              .Append("</a>");
+                        }
+                        else
+                        {
+                            // 解決できない (リゾルバなし or タイトル未一致) → 注意喚起付きで原文表示
+                            sb.Append("<span class=\"unresolved-link\">[[")
+                              .Append(EscapeHtml(inner))
+                              .Append("]]</span>");
+                        }
+                        i = end + 2;
+                        continue;
+                    }
+                }
+
                 // リンク [text](url)
                 if (text[i] == '[')
                 {
                     var m = LinkRe.Match(text.Substring(i));
                     if (m.Success)
                     {
-                        var label = ProcessInline(m.Groups[1].Value);
+                        var label = ProcessInline(m.Groups[1].Value, titleResolver);
                         var url = EscapeHtml(m.Groups[2].Value);
                         sb.Append("<a href=\"").Append(url).Append("\">")
                           .Append(label).Append("</a>");
@@ -224,7 +274,7 @@ namespace NoteBase.Markdown
                     if (end > i)
                     {
                         var inner = text.Substring(i + 2, end - i - 2);
-                        sb.Append("<strong>").Append(ProcessInline(inner)).Append("</strong>");
+                        sb.Append("<strong>").Append(ProcessInline(inner, titleResolver)).Append("</strong>");
                         i = end + 2;
                         continue;
                     }
@@ -237,7 +287,7 @@ namespace NoteBase.Markdown
                     if (end > i)
                     {
                         var inner = text.Substring(i + 1, end - i - 1);
-                        sb.Append("<em>").Append(ProcessInline(inner)).Append("</em>");
+                        sb.Append("<em>").Append(ProcessInline(inner, titleResolver)).Append("</em>");
                         i = end + 1;
                         continue;
                     }

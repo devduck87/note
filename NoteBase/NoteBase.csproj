@@ -73,6 +73,12 @@
     <Compile Include="UI\NoteEditForm.Designer.cs">
       <DependentUpon>NoteEditForm.cs</DependentUpon>
     </Compile>
+    <Compile Include="UI\NotePickerDialog.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="UI\NotePickerDialog.Designer.cs">
+      <DependentUpon>NotePickerDialog.cs</DependentUpon>
+    </Compile>
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <EmbeddedResource Include="Properties\Resources.resx">

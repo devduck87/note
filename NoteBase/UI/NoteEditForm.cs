@@ -122,6 +122,29 @@ namespace NoteBase.UI
             Close();
         }
 
+        private void NoteEditForm_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Control && e.KeyCode == Keys.L)
+            {
+                InsertNoteLinkAtCursor();
+                e.Handled = true;
+            }
+        }
+
+        private void InsertNoteLinkAtCursor()
+        {
+            if (_draft == null) return;
+            using (var picker = new NotePickerDialog(_repo, _draft.Id))
+            {
+                if (picker.ShowDialog(this) == DialogResult.OK && picker.SelectedMeta != null)
+                {
+                    var m = picker.SelectedMeta;
+                    var snippet = "[" + (m.Title ?? "") + "](../" + m.Id + "/index.md)";
+                    InsertAtCursor(snippet);
+                }
+            }
+        }
+
         private void NoteEditForm_FormClosing(object sender, FormClosingEventArgs e)
         {
             if (!_saved && _draft != null)

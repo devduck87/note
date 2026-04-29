@@ -46,11 +46,29 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="Form1.cs">
+    <Compile Include="Core\NoteId.cs" />
+    <Compile Include="Core\NoteMeta.cs" />
+    <Compile Include="Core\NoteStatus.cs" />
+    <Compile Include="Core\NoteType.cs" />
+    <Compile Include="Core\Schedule.cs" />
+    <Compile Include="Markdown\MarkdownToHtml.cs" />
+    <Compile Include="Storage\AppPaths.cs" />
+    <Compile Include="Storage\AtomicWriter.cs" />
+    <Compile Include="Storage\ImageStore.cs" />
+    <Compile Include="Storage\MetaJson.cs" />
+    <Compile Include="Storage\NoteRepository.cs" />
+    <Compile Include="Storage\TrashService.cs" />
+    <Compile Include="UI\MainForm.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Include="Form1.Designer.cs">
-      <DependentUpon>Form1.cs</DependentUpon>
+    <Compile Include="UI\MainForm.Designer.cs">
+      <DependentUpon>MainForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="UI\NoteEditForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="UI\NoteEditForm.Designer.cs">
+      <DependentUpon>NoteEditForm.cs</DependentUpon>
     </Compile>
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

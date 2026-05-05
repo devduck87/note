@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "PowerShell(py -m unittest discover -s tests -t . 2>&1 | Select-Object -Last 5; \"---\"; $env:PYTHONPATH = \"c:\\\\Work\\\\NoteBase2\"; py tests\\\\_smoke_main_with_data.py 2>&1; \"---\"; py tests\\\\_smoke_dnd.py 2>&1)",
-      "PowerShell(\"---\")"
-    ]
-  }
-}

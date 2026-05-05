@@ -419,3 +419,7 @@ ehthumbs.db
 Desktop.ini
 $RECYCLE.BIN/
 .DS_Store
+
+# Claude Code: harness が自動更新する個人設定 (絶対パス・個別許可など) は追跡しない
+.claude/settings.json
+.claude/settings.local.json

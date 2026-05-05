@@ -28,6 +28,10 @@ namespace NoteBase.UI
         private Dictionary<string, string> _titleToIdCache;
         private Dictionary<string, string> _summaryCache;
         private readonly string _previewTempPath;
+        // 同じファイル URL への Navigate はフラグメントのみ変化だと再読み込みが起きないため、
+        // クエリ文字列でキャッシュバスターを付けて URL 自体を変える。
+        private int _previewVersion;
+        private string _previewBaseUrl;
         private static readonly UTF8Encoding Utf8NoBom = new UTF8Encoding(false);
         private readonly Stack<string> _navHistory = new Stack<string>();
         private bool _navigatingBack;
@@ -276,17 +280,17 @@ namespace NoteBase.UI
             // 一時ファイル経由で Navigate して URL を file:// にする。
             File.WriteAllText(_previewTempPath, doc, Utf8NoBom);
 
+            // ベース URL を毎回変えないと、フラグメントだけ違う Navigate と判定されて
+            // ドキュメントが再読み込みされず、書き換え前の内容が表示されたままになる。
+            _previewVersion++;
+            _previewBaseUrl = new Uri(_previewTempPath).AbsoluteUri + "?v=" + _previewVersion;
+
             // _pendingAnchor があれば URL フラグメントに含めてブラウザに自動スクロールさせる。
             // (GetElementById/ScrollIntoView より確実)
-            string navigateUrl;
+            string navigateUrl = _previewBaseUrl;
             if (!string.IsNullOrEmpty(_pendingAnchor))
             {
-                var fileUri = new Uri(_previewTempPath).AbsoluteUri;
-                navigateUrl = fileUri + "#" + Uri.EscapeDataString(_pendingAnchor);
-            }
-            else
-            {
-                navigateUrl = _previewTempPath;
+                navigateUrl += "#" + Uri.EscapeDataString(_pendingAnchor);
             }
             webPreview.Navigate(navigateUrl);
         }
@@ -810,9 +814,9 @@ namespace NoteBase.UI
             try
             {
                 // URL フラグメントを変えて Navigate するとブラウザが自動でスクロールする
-                // (file 内容は変わっていないので reload は走らずスクロールだけ)
-                var fileUri = new Uri(_previewTempPath).AbsoluteUri;
-                webPreview.Navigate(fileUri + "#" + Uri.EscapeDataString(anchor));
+                // (ベース URL が同じ = file 内容も同じ なので reload は走らずスクロールだけ)
+                var baseUrl = _previewBaseUrl ?? new Uri(_previewTempPath).AbsoluteUri;
+                webPreview.Navigate(baseUrl + "#" + Uri.EscapeDataString(anchor));
             }
             catch
             {
@@ -932,9 +936,14 @@ namespace NoteBase.UI
             {
                 string body;
                 _repo.Load(id, out body);
+                // アンカーが指定されていれば該当セクション / ブロックだけに絞る
+                var contentBody = string.IsNullOrEmpty(anchor)
+                    ? body : MarkdownIndex.ExtractSection(body, anchor);
                 var noteDir = _paths.NoteDir(id);
                 var baseUrl = "file:///" + noteDir.Replace('\\', '/').TrimEnd('/') + "/";
-                var html = MarkdownToHtml.Convert(body, ResolveTitleToId, baseUrl, ResolveNoteSummary);
+                var html = MarkdownToHtml.Convert(contentBody, ResolveTitleToId, baseUrl, ResolveNoteSummary);
+                // セクション抽出後はアンカーが先頭に来ているのでスクロール不要だが、
+                // 抽出が一致せず全文フォールバックされた場合に備えて anchor は渡しておく。
                 _hoverPopup.SetContent(id, html, anchor);
 
                 if (!_hoverPopup.Visible)

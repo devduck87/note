@@ -239,6 +239,75 @@ namespace NoteBase.Markdown
             return result;
         }
 
+        /// <summary>
+        /// アンカー (見出しスラグ または ブロック ID) に対応する範囲だけを切り出す。
+        /// 見出しの場合は、その見出しから次の同位階以上の見出しの直前までを返す。
+        /// ブロック ID の場合は、その段落 / リスト項目だけを返す。
+        /// 一致しない場合は body をそのまま返す (フォールバック)。
+        /// </summary>
+        public static string ExtractSection(string body, string anchor)
+        {
+            if (string.IsNullOrEmpty(body) || string.IsNullOrEmpty(anchor)) return body;
+
+            var normalized = body.Replace("\r\n", "\n").Replace("\r", "\n");
+            var lines = normalized.Split('\n');
+
+            // 1) 見出しスラグでマッチ
+            bool inFence = false;
+            int headingStart = -1;
+            int headingLevel = 0;
+            for (int i = 0; i < lines.Length; i++)
+            {
+                var line = lines[i];
+                if (line.TrimStart().StartsWith("```")) { inFence = !inFence; continue; }
+                if (inFence) continue;
+                var m = HeadingRe.Match(line);
+                if (!m.Success) continue;
+                string id;
+                var text = StripTrailingBlockId(m.Groups[2].Value, out id);
+                if (SlugifyHeading(text) == anchor)
+                {
+                    headingStart = i;
+                    headingLevel = m.Groups[1].Value.Length;
+                    break;
+                }
+            }
+            if (headingStart >= 0)
+            {
+                int end = lines.Length;
+                inFence = false;
+                for (int i = headingStart + 1; i < lines.Length; i++)
+                {
+                    var line = lines[i];
+                    if (line.TrimStart().StartsWith("```")) { inFence = !inFence; continue; }
+                    if (inFence) continue;
+                    var m = HeadingRe.Match(line);
+                    if (m.Success && m.Groups[1].Value.Length <= headingLevel)
+                    {
+                        end = i;
+                        break;
+                    }
+                }
+                // 末尾の空行を削る
+                while (end > headingStart + 1 && string.IsNullOrWhiteSpace(lines[end - 1]))
+                    end--;
+                return string.Join("\n", lines, headingStart, end - headingStart);
+            }
+
+            // 2) ブロック ID でマッチ
+            var blocks = ExtractBlocks(body);
+            foreach (var b in blocks)
+            {
+                if (b.ExistingId == anchor)
+                {
+                    return string.Join("\n", lines, b.LineStart, b.LineEnd - b.LineStart + 1);
+                }
+            }
+
+            // 一致なし: 全文を返す
+            return body;
+        }
+
         private static string StripTrailingBlockId(string s, out string id)
         {
             if (s == null) { id = null; return null; }

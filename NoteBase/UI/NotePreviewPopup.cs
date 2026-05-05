@@ -16,6 +16,9 @@ namespace NoteBase.UI
         private readonly string _tempHtmlPath;
         private string _currentNoteId;
         private string _pendingAnchor;
+        // 同じ URL への Navigate はフラグメントのみ変化だと再読み込みが起きないため、
+        // クエリでキャッシュバスターを付けて URL を変える。
+        private int _navVersion;
 
         public NotePreviewPopup()
         {
@@ -74,15 +77,14 @@ namespace NoteBase.UI
 
             File.WriteAllText(_tempHtmlPath, doc, Utf8NoBom);
 
-            string navigateUrl;
+            // ベース URL を毎回変えないと、ノート切り替え時に書き換え前の内容が表示され続ける。
+            _navVersion++;
+            var baseUrl = new Uri(_tempHtmlPath).AbsoluteUri + "?v=" + _navVersion;
+
+            string navigateUrl = baseUrl;
             if (!string.IsNullOrEmpty(anchor))
             {
-                var fileUri = new Uri(_tempHtmlPath).AbsoluteUri;
-                navigateUrl = fileUri + "#" + Uri.EscapeDataString(anchor);
-            }
-            else
-            {
-                navigateUrl = _tempHtmlPath;
+                navigateUrl += "#" + Uri.EscapeDataString(anchor);
             }
             webContent.Navigate(navigateUrl);
         }

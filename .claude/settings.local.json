@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell($env:PYTHONPATH = \"c:\\\\Work\\\\NoteBase2\"; py tests\\\\_smoke_main_with_data.py 2>&1)",
+      "PowerShell(py -m unittest tests.test_file_dnd -v 2>&1)"
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "meta_version": 1,
+  "id": "20260428-150000-release-instance",
+  "title": "リリース実施記録 2026-04-28",
+  "type": "log",
+  "status": "done",
+  "tags": ["release", "ops"],
+  "instance_of": "20260410-110000-release-checklist",
+  "created": "2026-04-28T15:00:00",
+  "updated": "2026-04-28T17:45:00"
+}

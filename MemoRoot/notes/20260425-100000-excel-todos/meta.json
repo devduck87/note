@@ -1,0 +1,11 @@
+{
+  "meta_version": 1,
+  "id": "20260425-100000-excel-todos",
+  "title": "Excelツール Todo",
+  "type": "todo",
+  "status": "active",
+  "tags": ["excel"],
+  "project": "excel-search-tool",
+  "created": "2026-04-25T10:00:00",
+  "updated": "2026-04-29T08:30:00"
+}

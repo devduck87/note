@@ -1,0 +1,10 @@
+{
+  "meta_version": 1,
+  "id": "20260422-143000-lvgl-buffer-memo",
+  "title": "LVGL バッファ設定メモ",
+  "type": "memo",
+  "status": "active",
+  "tags": ["lvgl", "gui", "embedded"],
+  "created": "2026-04-22T14:30:00",
+  "updated": "2026-04-22T15:10:00"
+}

@@ -1,0 +1,15 @@
+{
+  "meta_version": 1,
+  "id": "20260415-080000-morning-routine",
+  "title": "朝の作業開始ルーティーン",
+  "type": "routine",
+  "status": "active",
+  "tags": ["routine", "daily"],
+  "schedule": {
+    "frequency": "weekly",
+    "days": ["mon", "tue", "wed", "thu", "fri"],
+    "enabled": true
+  },
+  "created": "2026-04-15T08:00:00",
+  "updated": "2026-05-05T20:44:45"
+}

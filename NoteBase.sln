@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Express 15 for Windows Desktop
 VisualStudioVersion = 15.0.37131.7
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NoteBase", "NoteBase\NoteBase.csproj", "{896263DB-B809-4943-BBBB-25F41F3CBBB2}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NoteBase", "NoteBase_csharp\NoteBase.csproj", "{896263DB-B809-4943-BBBB-25F41F3CBBB2}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

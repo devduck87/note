@@ -1,0 +1,10 @@
+{
+  "meta_version": 1,
+  "id": "20260410-110000-release-checklist",
+  "title": "リリース手順チェックリスト",
+  "type": "checklist",
+  "status": "active",
+  "tags": ["release", "ops"],
+  "created": "2026-04-10T11:00:00",
+  "updated": "2026-04-29T20:10:08"
+}

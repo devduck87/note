@@ -1,0 +1,9 @@
+[project]
+name = "notebase"
+version = "0.1.0"
+description = "Markdown note-taking app (Python port of NoteBase, stdlib only)"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.unittest]
+start-dir = "tests"

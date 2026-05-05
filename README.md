@@ -20,7 +20,7 @@ $env:NOTEBASE_ROOT = "C:\path\to\my\notes"
 python -m notebase
 ```
 
-旧 C# 版 (`NoteBase_csharp/bin/Debug/MemoRoot/`) のデータがあれば初回起動時に自動コピーされます。
+既存データはそのまま読めます。旧 C# 版が `NoteBase_csharp/bin/Debug/MemoRoot/` に残っている環境では初回起動時に自動コピーされます (現リポジトリは C# 版削除済み)。
 
 ## 操作
 
@@ -49,6 +49,6 @@ python -m unittest discover -s tests -t .
 - プレビューの画像表示は **PNG / GIF のみ**。Tk PhotoImage の制約で JPEG/BMP は `[image: <name>]` プレースホルダで代替。
 - クリップボード画像は **24bpp BI_RGB / 32bpp BI_RGB / 32bpp BI_BITFIELDS (BITMAPV5HEADER)** に対応。8bpp 以下のパレット形式や RLE 圧縮は未対応。
 
-## ライセンス / 由来
+## 由来
 
-C# 版 (`NoteBase_csharp/`) は Python 版完成後に削除予定。Python 移植版は元の WinForms 実装と仕様互換 (meta.json バイト一致、フォルダ構造完全互換)。
+元は C# WinForms 製アプリ。Python 移植版は元実装と仕様互換 (meta.json バイト一致、フォルダ構造完全互換)。

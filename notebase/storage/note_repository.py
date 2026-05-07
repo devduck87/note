@@ -113,6 +113,43 @@ class NoteRepository:
         self._trash.move_note(note_id)
 
     # ------------------------------------------------------------
+    # テンプレート → インスタンス
+    # ------------------------------------------------------------
+
+    def create_instance(self, template_id: str) -> tuple[NoteMeta, str]:
+        """`type=procedure` / `type=checklist` テンプレートから実施記録 (type=log) のドラフトを作る。
+
+        - 新規 ID とフォルダを作成 (空の images/ 含む)
+        - meta は `type=log`、`instance_of=template_id`、tags はテンプレからコピー
+        - 本文先頭にテンプレへの Wiki 参照行を入れ、続けてテンプレ本文 (先頭 H1 は除去) を貼る
+        - **保存はせず** `(meta, body)` を返す。呼び出し元が編集ウィンドウへ流す想定。
+        """
+        template_meta, template_body = self.load(template_id)
+
+        now = datetime.now()
+        date_suffix = now.strftime("%Y-%m-%d")
+        title = (template_meta.title or "untitled") + " " + date_suffix
+
+        nid = note_id_mod.generate(title, now)
+        nid = note_id_mod.ensure_unique(nid, self._paths.notes, now)
+        self._paths.note_dir(nid).mkdir(parents=True, exist_ok=True)
+        self._paths.images_dir(nid).mkdir(parents=True, exist_ok=True)
+
+        meta = NoteMeta(
+            id=nid,
+            title=title,
+            type=NoteType.LOG,
+            status=NoteStatus.ACTIVE,
+            tags=list(template_meta.tags or []),
+            instance_of=template_id,
+            created=now,
+            updated=now,
+        )
+
+        body = _build_instance_body(template_meta.title or "", template_body)
+        return meta, body
+
+    # ------------------------------------------------------------
     # ブロック ID 自動付与
     # ------------------------------------------------------------
 
@@ -158,6 +195,33 @@ def _extract_all_block_ids(body: str | None) -> set[str]:
 
 def _generate_block_id() -> str:
     return "".join(random.choice(_ID_ALPHABET) for _ in range(6))
+
+
+def _build_instance_body(template_title: str, template_body: str | None) -> str:
+    """テンプレ本文の先頭 H1 を取り除き、テンプレ参照の引用行を先頭に挿入する。
+
+    `_sync_title_h1` がインスタンスの新タイトルで H1 を再付与するので、
+    テンプレ側の H1 は残してしまうと重複する。ここで除去する。
+    改行は LF のまま返し、保存時に `_write_common` 内で正規化される。
+    """
+    src = (template_body or "").replace("\r\n", "\n").replace("\r", "\n")
+    lines = src.split("\n")
+
+    # 先頭の空行をスキップしつつ、最初の非空行が H1 ならその行を除く
+    i = 0
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    if i < len(lines) and lines[i].startswith("# "):
+        del lines[i]
+        # H1 直後の空行も 1 つ詰める
+        if i < len(lines) and not lines[i].strip():
+            del lines[i]
+
+    rest = "\n".join(lines).lstrip("\n")
+    ref_line = f"> テンプレート: [[{template_title}]]" if template_title else "> テンプレート"
+    if rest:
+        return f"{ref_line}\n\n{rest}"
+    return f"{ref_line}\n"
 
 
 def _sync_title_h1(body: str | None, title: str | None) -> str:

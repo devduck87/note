@@ -57,10 +57,11 @@ Markdown単体で情報を管理する場合、以下の課題がある。
 | ホバーでプレビューポップアップ | ✅ 実装済 |
 | ノート間ナビゲーション (戻るスタック) | ✅ 実装済 |
 | ノートピッカー (Ctrl+L で他ノートのブロックを参照挿入) | ✅ 実装済 |
-| 行内メタ記法 (`@date` / `#tag`) のタスク抽出 | ⚠️ 未実装 (Markdown 上では許容、index 化なし) |
-| `type=todo` のタスク抽出・進捗集計 | ⚠️ 未実装 |
-| `type=routine` のスケジュール解釈・日次 Todo 生成 | ⚠️ 未実装 |
-| `type=checklist` の実施記録インスタンス生成 | ⚠️ 未実装 |
+| 行内メタ記法 `@date` のタスク抽出 | ✅ 実装済 (`#tag` は将来) |
+| `type=todo` のタスク抽出 | ✅ 実装済 (進捗集計は本日プラン側で評価) |
+| `type=routine` のスケジュール解釈・日次プラン生成 | ✅ 実装済 (daily/weekly/monthly + enabled 評価) |
+| `type=procedure` / `type=checklist` の実施記録インスタンス生成 | ✅ 実装済 (`create_instance` 共通機構、UI: 「実施を開始」ボタン) |
+| 本日プラン (チェックリスト + タイムボクシング出力) | ✅ 実装済 (`type=daily` ノートとして保存) |
 | 条件抽出 Markdown 出力 | ⚠️ 未実装 |
 | Obsidian 互換エクスポート | ⚠️ 未実装 |
 | キャンバス表示 | ⚠️ 未実装 |
@@ -530,54 +531,81 @@ SQLite + 全文検索（FTS5）
 * 本文のチェック項目はテンプレ（チェック状態を変更しない）
 * 日次 Todo 生成時に該当 routine の本文を取り込む
 
-### 7.10 チェックリスト管理機能 (type=checklist)
+### 7.10 テンプレート/実施記録機能 (type=procedure, checklist → log)
 
 #### 7.10.1 概要
 
-作業時に使う再利用可能なチェックリストテンプレート。用語は §6.4.1 に従う（テンプレート / インスタンス、UI 表示は「実施記録」）。
+`type=procedure` (手順書) と `type=checklist` (チェックリスト) は再利用可能なテンプレート。
+両者とも同一機構で実施記録 (`type=log` + `instance_of=テンプレート ID`) を新規生成できる。
+用語は §6.4.1 に従う (UI 表示は「実施記録」、ボタンラベルは「実施を開始」)。
 
 #### 7.10.2 要件
 
-* テンプレートは `type=checklist` ノートとして保存
-* 「実施を開始」操作で**実施記録**（`type=log`、`instance_of=元テンプレート ID`）を新規生成
-* インスタンスは `notes/<新 ID>/` 配下に作成
-* 元テンプレートのチェック状態は変更しない
-* 過去の実施記録は `type=log` として残る
-* 実施記録の本文先頭にテンプレートへのリンクを自動挿入する
+* テンプレートは `type=procedure` または `type=checklist` ノートとして保存
+* メイン画面のツールバー「実施を開始」ボタンは、選択中ノートが procedure / checklist のときのみ有効
+* クリックで実施記録のドラフト (`type=log`、`instance_of=元テンプレート ID`、tags はテンプレからコピー) を作り、編集ウィンドウを起動
+* インスタンスは `notes/<新 ID>/` 配下に作成 (空 `images/` 含む)
+* 実施記録のタイトル既定値: `<テンプレタイトル> YYYY-MM-DD`
+* 実施記録の本文先頭にテンプレートへの Wiki 参照行を自動挿入: `> テンプレート: [[<元タイトル>]]`
+* テンプレ本文の先頭 H1 はインスタンスのタイトルで再付与されるので除去
+* 元テンプレートのチェック状態は変更しない (独立コピー)
+* 過去の実施記録は `type=log` として残り、テンプレ側の `[[Title]]` リンクから辿れる
 
-### 7.11 日次 Todo 生成機能
+実装: [notebase/storage/note_repository.py](../notebase/storage/note_repository.py) `create_instance` /
+[notebase/ui/main_window.py](../notebase/ui/main_window.py) `_on_start_instance`
+
+### 7.11 本日プラン生成機能
 
 #### 7.11.1 概要
 
-指定日のタスクとルーティーンをまとめた Markdown を生成する。
+指定日 (既定: 今日) の todo タスクとルーティーンを集約し、ユーザがチェック+所要分を編集して
+**チェックリスト + タイムボクシング併記の Markdown** を生成する。
+出力は `outputs/daily_todo/` ではなく **`type=daily` ノート**として `notes/<新 ID>/` に保存し、
+他のノートと同様に検索・プレビュー・リンクの対象とする (仕様書 §7.11.2 当初設計からの変更点)。
 
 #### 7.11.2 要件
 
-* 指定日を入力できる
-* `due_date` が指定日以前の `type=todo` の未完了タスク行を抽出
-* `enabled=true` かつ指定日に該当する `type=routine` の本文を取り込む
-* `type=checklist` / `type=log` は対象外
-* `outputs/daily_todo/YYYY-MM-DD.md` として出力
-* 本ファイルが routine の事実上の完了履歴となる
+* メインツールバー「本日のプラン…」ボタンで選定ダイアログを開く
+* 自動候補:
+  - `due_date` が指定日以前 (または期限なし) かつ未完了の `type=todo` タスク行 (`@YYYY-MM-DD` 解析)
+  - `enabled=true` かつ `schedule` が指定日に該当する `type=routine` (1 ノート 1 行)
+  - `type=checklist` / `type=log` は自動候補対象外
+* 各行に所要分を入力 (既定 30、ダブルクリックで編集)
+* チェックボックス列 (`✓`) で取捨選択
+* 「ノートから追加…」「手動で追加…」で任意項目を追加可能
+* 「作成」で新ノート (`type=daily`、タイトル既定 `YYYY-MM-DD のプラン`) を保存
+* 開始時刻 (既定 `09:00`) からタスクの所要分を順次足してタイムボックス行を生成
+* ルーティーンは内部チェック項目を展開せず 1 行に集約
 
 #### 7.11.3 出力例
 
 ```markdown
-# 2026-04-28 Todo
+# 2026-05-07 のプラン
 
-## 期限のタスク
+## チェックリスト
 
-- [ ] 仕様書をレビューする @2026-05-10 #high
-- [ ] テスト項目作成 @2026-05-15 #excel
+- [ ] 朝のルーティン
+- [ ] 仕様書レビュー
+- [ ] テスト追加 (開発)
 
-## 本日のルーティーン
+## タイムボックス
 
-### 朝の作業開始ルーティーン
-
-- [ ] メールチェック
-- [ ] 本日の Todo 確認
-- [ ] 作業ログを開く
+- 09:00–09:15 朝のルーティン (15m)
+- 09:15–10:15 仕様書レビュー (60m)
+- 10:15–10:45 テスト追加 (開発) (30m)
 ```
+
+実装: [notebase/planning/daily_planner.py](../notebase/planning/daily_planner.py) (候補集約 + Markdown 生成) /
+[notebase/planning/task_extract.py](../notebase/planning/task_extract.py) (`@date` 抽出) /
+[notebase/planning/routine_match.py](../notebase/planning/routine_match.py) (`Schedule` の日付評価) /
+[notebase/ui/daily_plan_dialog.py](../notebase/ui/daily_plan_dialog.py) (選定 UI)
+
+#### 7.11.4 含まない (将来課題)
+
+* 行内メタ記法 `#tag` 抽出
+* daily ノートのチェックを元 todo に書き戻す双方向同期
+* routine 完了履歴の遡及集計
+* `outputs/daily_todo/` への並行出力 (今は notes 配下のみ)
 
 ### 7.12 条件抽出 Markdown 出力機能
 
@@ -1034,15 +1062,20 @@ images/ をコピー
 * JSON インデックス (今は走査毎にメタ load)
 * 外部編集検知 (`index.md` の OS mtime 監視)
 
-### 13.3 Phase 3: Todo・Routine 版 ⏸ 未着手
+### 13.3 Phase 3: Todo・Routine 版 ⚠️ 部分実装
 
-* 行内メタ記法解析 (`@date` / `#tag`)
-* タスク抽出
-* routine 管理 (schedule 編集 UI)
-* checklist インスタンス生成 (「実施を開始」操作)
-* 日次 Todo 生成 (`outputs/daily_todo/`)
+実装済:
+* 行内メタ記法 `@date` 解析 ([notebase/planning/task_extract.py](../notebase/planning/task_extract.py))
+* `type=todo` のタスク行抽出
+* `Schedule` の日付評価 (daily / weekly / monthly + enabled、[notebase/planning/routine_match.py](../notebase/planning/routine_match.py))
+* テンプレート→実施記録機構 (procedure / checklist 共通、[notebase/storage/note_repository.py](../notebase/storage/note_repository.py) `create_instance`)
+* 本日プラン生成 (チェックリスト + タイムボクシング、`type=daily` ノートとして保存)
 
-データモデル (`type=todo` / `routine` / `checklist` / `log`、`schedule`、`instance_of`) はサポート済 (load/save/serialize 可)。動作機能は未実装。
+未実装 (Phase 3 残):
+* 行内メタ記法 `#tag` 抽出
+* `Schedule` の編集 UI (今は `meta.json` 直接編集 or 編集ウィンドウのフォームで間接操作)
+* `outputs/daily_todo/` への並行出力 (現行は `notes/` 配下のみ)
+* daily ノート→元 todo の双方向同期
 
 ### 13.4 Phase 4: エクスポート・抽出版 ⏸ 未着手
 

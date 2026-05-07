@@ -12,10 +12,12 @@ from tkinter import messagebox, ttk
 from typing import Callable
 
 from ..core.note_meta import NoteMeta
+from ..core.note_type import NoteType
 from ..markdown.summary import extract as extract_summary
 from ..storage.app_paths import AppPaths
 from ..storage.note_repository import NoteRepository
 from ..storage.trash_service import TrashService
+from .daily_plan_dialog import DailyPlanDialog
 from .md_preview import LinkInfo, MarkdownRenderer
 from .note_edit_window import NoteEditWindow, choose_note_type
 from .note_preview_popup import NotePreviewPopup
@@ -69,6 +71,14 @@ class MainWindow:
         ttk.Button(toolbar, text="編集 (Ctrl+E)", command=self._on_edit).pack(
             side="left", padx=2
         )
+        self._start_instance_btn = ttk.Button(
+            toolbar, text="実施を開始", command=self._on_start_instance
+        )
+        self._start_instance_btn.pack(side="left", padx=2)
+        self._start_instance_btn.state(["disabled"])
+        ttk.Button(
+            toolbar, text="本日のプラン…", command=self._on_open_daily_plan
+        ).pack(side="left", padx=2)
         ttk.Button(toolbar, text="ゴミ箱へ", command=self._on_delete).pack(
             side="left", padx=2
         )
@@ -261,6 +271,7 @@ class MainWindow:
                 self._prop_updated,
             ):
                 lab.config(text="-")
+            self._start_instance_btn.state(["disabled"])
             return
         self._prop_title.config(text=meta.title or "(無題)")
         self._prop_type.config(text=meta.type.display_name())
@@ -276,6 +287,10 @@ class MainWindow:
         self._prop_updated.config(
             text=meta.updated.strftime("%Y-%m-%d %H:%M")
         )
+        if meta.type in (NoteType.PROCEDURE, NoteType.CHECKLIST):
+            self._start_instance_btn.state(["!disabled"])
+        else:
+            self._start_instance_btn.state(["disabled"])
 
     def _render_preview(self, body: str, *, base_dir: Path | None = None) -> None:
         if self._renderer is None:
@@ -386,3 +401,35 @@ class MainWindow:
         self._repo.move_to_trash(self._current_id)
         self._current_id = None
         self._reload_notes()
+
+    def _on_start_instance(self) -> None:
+        if self._current_id is None:
+            return
+        try:
+            template_meta, _body = self._repo.load(self._current_id)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror(
+                "読み込みエラー", f"{self._current_id}: {exc}", parent=self._root
+            )
+            return
+        if template_meta.type not in (NoteType.PROCEDURE, NoteType.CHECKLIST):
+            return
+        try:
+            meta, body = self._repo.create_instance(self._current_id)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror(
+                "実施記録の作成に失敗", str(exc), parent=self._root
+            )
+            return
+        win = NoteEditWindow(self._root, self._repo, meta, body, is_new=True)
+        saved = win.show()
+        if saved is not None:
+            self._current_id = None
+            self._reload_notes(select_id=saved.id)
+
+    def _on_open_daily_plan(self) -> None:
+        dlg = DailyPlanDialog(self._root, self._repo)
+        new_id = dlg.show()
+        if new_id is not None:
+            self._current_id = None
+            self._reload_notes(select_id=new_id)

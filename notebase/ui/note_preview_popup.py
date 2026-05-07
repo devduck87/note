@@ -122,11 +122,48 @@ class NotePreviewPopup:
         self._renderer._title_resolver = self._title_resolver
         self._renderer.render(body)
 
-        # 位置決め: カーソル右下少し下に
-        self._top.geometry(f"+{x_root + 16}+{y_root + 16}")
+        # サイズ確定後に画面端を考慮した位置決め (画面外にはみ出さないようフリップ)
+        self._top.update_idletasks()
+        x, y = self._compute_position(x_root, y_root)
+        self._top.geometry(f"+{x}+{y}")
         self._top.deiconify()
         self._top.lift()
         self._current_target = (note_id, anchor)
+
+    def _compute_position(self, x_root: int, y_root: int) -> tuple[int, int]:
+        """ポップアップが画面内に収まる位置を返す。"""
+        assert self._top is not None
+        try:
+            pw = self._top.winfo_reqwidth()
+            ph = self._top.winfo_reqheight()
+            sw = self._top.winfo_screenwidth()
+            sh = self._top.winfo_screenheight()
+        except tk.TclError:
+            return (x_root + 16, y_root + 16)
+        return flip_position(x_root, y_root, pw, ph, sw, sh)
+
+
+def flip_position(
+    x_root: int,
+    y_root: int,
+    popup_w: int,
+    popup_h: int,
+    screen_w: int,
+    screen_h: int,
+    margin: int = 16,
+) -> tuple[int, int]:
+    """ポップアップの最終位置を決める純粋関数。
+
+    既定はカーソル右下 +16px。右端や下端をはみ出す場合は反対側へフリップ。
+    画面より大きいポップアップでも 0 未満には行かないようクランプ。
+    """
+    x = x_root + margin
+    y = y_root + margin
+    if x + popup_w > screen_w:
+        x = max(0, x_root - popup_w - margin)
+    if y + popup_h > screen_h:
+        y = max(0, y_root - popup_h - margin)
+    return (x, y)
 
     def _build_popup(self) -> None:
         top = tk.Toplevel(self._master)

@@ -174,34 +174,6 @@ class NotePreviewPopup:
         work = _get_work_area(sw, sh)
         return flip_position(x_root, y_root, pw, ph, work_area=work)
 
-
-def flip_position(
-    x_root: int,
-    y_root: int,
-    popup_w: int,
-    popup_h: int,
-    *,
-    work_area: tuple[int, int, int, int],
-    margin: int = 16,
-) -> tuple[int, int]:
-    """ポップアップの最終位置を決める純粋関数。
-
-    `work_area` は (left, top, right, bottom) の作業領域 (Windows ならタスクバー除外)。
-    既定はカーソル右下 +16px。作業領域からはみ出す場合は反対側へフリップ。
-    領域より大きいポップアップでも領域内にクランプ。
-    """
-    left, top, right, bottom = work_area
-    x = x_root + margin
-    y = y_root + margin
-    if x + popup_w > right:
-        x = x_root - popup_w - margin
-    if y + popup_h > bottom:
-        y = y_root - popup_h - margin
-    # 領域上端/左端より上/左には行かない
-    x = max(left, x)
-    y = max(top, y)
-    return (x, y)
-
     def _build_popup(self) -> None:
         top = tk.Toplevel(self._master)
         top.overrideredirect(True)
@@ -237,3 +209,31 @@ def flip_position(
             except tk.TclError:
                 pass
         self._current_target = None
+
+
+def flip_position(
+    x_root: int,
+    y_root: int,
+    popup_w: int,
+    popup_h: int,
+    *,
+    work_area: tuple[int, int, int, int],
+    margin: int = 16,
+) -> tuple[int, int]:
+    """ポップアップの最終位置を決める純粋関数。
+
+    `work_area` は (left, top, right, bottom) の作業領域 (Windows ならタスクバー除外)。
+    既定はカーソル右下 +16px。作業領域からはみ出す場合は反対側へフリップ。
+    領域より大きいポップアップでも領域内にクランプ。
+    """
+    left, top, right, bottom = work_area
+    x = x_root + margin
+    y = y_root + margin
+    if x + popup_w > right:
+        x = x_root - popup_w - margin
+    if y + popup_h > bottom:
+        y = y_root - popup_h - margin
+    # 領域上端/左端より上/左には行かない
+    x = max(left, x)
+    y = max(top, y)
+    return (x, y)

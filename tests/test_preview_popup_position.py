@@ -4,7 +4,26 @@ from __future__ import annotations
 
 import unittest
 
-from notebase.ui.note_preview_popup import flip_position
+from notebase.ui.note_preview_popup import NotePreviewPopup, flip_position
+
+
+class ClassStructureTests(unittest.TestCase):
+    """過去にメソッドが誤ってモジュール関数のネストになるリグレッションを再発防止。"""
+
+    def test_required_methods_on_class(self) -> None:
+        for name in (
+            "schedule_show",
+            "schedule_hide",
+            "hide_now",
+            "_do_show",
+            "_build_popup",
+            "_do_hide",
+            "_compute_position",
+        ):
+            self.assertTrue(
+                hasattr(NotePreviewPopup, name),
+                f"NotePreviewPopup is missing method {name!r}",
+            )
 
 
 class FlipPositionTests(unittest.TestCase):

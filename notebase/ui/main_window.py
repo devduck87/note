@@ -316,10 +316,45 @@ class MainWindow:
                 base_dir=base_dir,
                 readonly=True,
                 on_task_toggle=self._on_task_toggle,
+                on_timebox_change=self._on_timebox_change,
             )
         else:
             self._renderer._base_dir = base_dir
         self._renderer.render(body)
+
+    def _on_timebox_change(
+        self,
+        start_line: int,
+        end_line: int,
+        start_time: str,
+        items: list,
+    ) -> None:
+        """TimeboxCanvas からのリサイズ/並べ替え結果を Markdown へ反映する。"""
+        if self._current_id is None:
+            return
+        from ..planning.timebox_format import render_timebox_lines
+
+        try:
+            meta, body = self._repo.load(self._current_id)
+        except (OSError, ValueError):
+            return
+        normalized = (body or "").replace("\r\n", "\n").replace("\r", "\n")
+        lines = normalized.split("\n")
+        if start_line < 0 or end_line >= len(lines) or start_line > end_line:
+            return
+        new_lines = render_timebox_lines(items, start_time)
+        lines[start_line : end_line + 1] = new_lines
+        new_body = "\r\n".join(lines)
+        try:
+            self._repo.save_existing(meta, new_body)
+        except OSError:
+            return
+        self._render_preview(
+            new_body, base_dir=self._paths.note_dir(self._current_id)
+        )
+        prev_id = self._current_id
+        self._reload_notes(select_id=prev_id)
+        self._current_id = prev_id
 
     def _on_task_toggle(self, source_line: int) -> None:
         """プレビュー上のチェックボックスをクリックされたとき: 該当行を反転して保存。"""

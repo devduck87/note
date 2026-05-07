@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date
 
 from ..core.note_type import NoteType
 from ..storage.note_repository import NoteRepository
@@ -115,13 +115,13 @@ def render_markdown(
     lines.append("## タイムボックス")
     lines.append("")
     if items:
-        cursor = _parse_time(start_time)
-        for it in items:
-            end = cursor + timedelta(minutes=max(0, it.duration_min))
-            lines.append(
-                f"- {_fmt(cursor)}–{_fmt(end)} {_format_text(it)} ({it.duration_min}m)"
-            )
-            cursor = end
+        from .timebox_format import TimeboxItem, render_timebox_lines
+
+        tb_items = [
+            TimeboxItem(label=_format_text(it), duration_min=it.duration_min)
+            for it in items
+        ]
+        lines.extend(render_timebox_lines(tb_items, start_time=start_time))
     else:
         lines.append("(候補なし)")
 
@@ -134,14 +134,3 @@ def _format_text(item: PlanItem) -> str:
     if item.note_title and item.note_title != item.text:
         return f"{item.text} ({item.note_title})"
     return item.text
-
-
-def _parse_time(s: str) -> datetime:
-    try:
-        return datetime.strptime(s.strip(), "%H:%M")
-    except ValueError:
-        return datetime.strptime(DEFAULT_START_TIME, "%H:%M")
-
-
-def _fmt(dt: datetime) -> str:
-    return dt.strftime("%H:%M")

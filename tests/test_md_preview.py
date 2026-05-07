@@ -94,28 +94,36 @@ class TimeboxRenderTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.text.destroy()
 
-    def test_timebox_line_gets_timebox_tag(self) -> None:
-        self.renderer.render("- 09:00–09:15 朝のルーティン (15m)")
-        self.assertTrue(self.text.tag_ranges("timebox"))
+    def _embedded_canvases(self) -> list:
+        from notebase.ui.timebox_canvas import TimeboxCanvas
 
-    def test_timebox_time_tag_applied(self) -> None:
-        self.renderer.render("- 09:00–09:15 朝のルーティン (15m)")
-        self.assertTrue(self.text.tag_ranges("timebox_time"))
-        self.assertTrue(self.text.tag_ranges("timebox_min"))
+        return [
+            w for w in self.renderer._embedded_widgets
+            if isinstance(w, TimeboxCanvas)
+        ]
 
-    def test_normal_list_item_has_no_timebox_tag(self) -> None:
+    def test_timebox_line_embeds_canvas(self) -> None:
+        self.renderer.render("- 09:00–09:15 朝のルーティン (15m)")
+        canvases = self._embedded_canvases()
+        self.assertEqual(len(canvases), 1)
+        items = canvases[0].items()
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].label, "朝のルーティン")
+        self.assertEqual(items[0].duration_min, 15)
+
+    def test_normal_list_item_does_not_embed_canvas(self) -> None:
         self.renderer.render("- ふつうのリスト項目")
-        self.assertEqual(self.text.tag_ranges("timebox"), ())
+        self.assertEqual(self._embedded_canvases(), [])
 
     def test_timebox_with_hyphen_separator(self) -> None:
         self.renderer.render("- 09:00-09:30 タスク (30m)")
-        self.assertTrue(self.text.tag_ranges("timebox"))
+        self.assertEqual(len(self._embedded_canvases()), 1)
 
     def test_short_form_timebox(self) -> None:
         self.renderer.render("- 9:00–9:30 早朝 (30m)")
-        self.assertTrue(self.text.tag_ranges("timebox"))
+        self.assertEqual(len(self._embedded_canvases()), 1)
 
-    def test_full_section_renders(self) -> None:
+    def test_consecutive_lines_grouped_into_one_canvas(self) -> None:
         body = (
             "## タイムボックス\n\n"
             "- 09:00–09:15 朝のルーティン (15m)\n"
@@ -123,13 +131,14 @@ class TimeboxRenderTests(unittest.TestCase):
             "- 10:15–10:45 テスト追加 (30m)\n"
         )
         self.renderer.render(body)
-        content = self.text.get("1.0", "end-1c")
-        self.assertIn("09:00 – 09:15", content)
-        self.assertIn("09:15 – 10:15", content)
-        self.assertIn("10:15 – 10:45", content)
-        self.assertIn("(15m)", content)
-        self.assertIn("(60m)", content)
-        self.assertIn("(30m)", content)
+        canvases = self._embedded_canvases()
+        self.assertEqual(len(canvases), 1)
+        items = canvases[0].items()
+        self.assertEqual([it.duration_min for it in items], [15, 60, 30])
+        self.assertEqual(
+            [it.label for it in items],
+            ["朝のルーティン", "仕様書レビュー", "テスト追加"],
+        )
 
 
 @unittest.skipUnless(_ROOT_AVAILABLE, "Tk root unavailable")
@@ -165,6 +174,77 @@ class TaskClickableTests(unittest.TestCase):
         renderer = self._renderer_cls(self.text, readonly=False)
         renderer.render("- [ ] x")
         self.assertEqual(renderer._task_tags, [])
+
+
+@unittest.skipUnless(_ROOT_AVAILABLE, "Tk root unavailable")
+class TimeboxCanvasInteractionTests(unittest.TestCase):
+    """TimeboxCanvas のドラッグハンドラを直接呼び、状態遷移を検証する。"""
+
+    def setUp(self) -> None:
+        from notebase.planning.timebox_format import TimeboxItem
+        from notebase.ui.timebox_canvas import TimeboxCanvas
+
+        self._items_seen: list[list] = []
+        self.canvas = TimeboxCanvas(
+            _root,
+            items=[
+                TimeboxItem("A", 30),
+                TimeboxItem("B", 60),
+                TimeboxItem("C", 30),
+            ],
+            start_time="09:00",
+            on_change=lambda items: self._items_seen.append(list(items)),
+        )
+
+    def tearDown(self) -> None:
+        self.canvas.destroy()
+
+    def _make_event(self, x: int, y: int):
+        ev = type("Event", (), {})()
+        ev.x = x
+        ev.y = y
+        return ev
+
+    def test_hit_test_distinguishes_edge_and_body(self) -> None:
+        # 0 番目は y=0..60 (30m * 2)。edge は y=54..60、body は y=0..54
+        self.assertEqual(self.canvas._hit(10, 5), (0, "body"))
+        self.assertEqual(self.canvas._hit(10, 56), (0, "edge"))
+        # 1 番目は y=60..180 (60m * 2)。edge は 174..180
+        self.assertEqual(self.canvas._hit(10, 100), (1, "body"))
+        self.assertEqual(self.canvas._hit(10, 176), (1, "edge"))
+
+    def test_resize_drag_increases_duration(self) -> None:
+        # 0 番目の edge を 60px (= +30 分) 下に
+        self.canvas._on_press(self._make_event(10, 56))
+        self.canvas._on_drag(self._make_event(10, 116))
+        self.canvas._on_release(self._make_event(10, 116))
+        items = self.canvas.items()
+        self.assertEqual(items[0].duration_min, 60)  # 30 + 30
+        # コールバックが呼ばれている
+        self.assertEqual(len(self._items_seen), 1)
+
+    def test_resize_drag_clamps_to_min_duration(self) -> None:
+        # 0 番目の edge を上に大きく動かして minimum (5m) に
+        self.canvas._on_press(self._make_event(10, 56))
+        self.canvas._on_drag(self._make_event(10, -200))
+        self.canvas._on_release(self._make_event(10, -200))
+        self.assertEqual(self.canvas.items()[0].duration_min, 5)
+
+    def test_reorder_swap_first_and_third(self) -> None:
+        # 0 番目 (A, body) を握り、3 番目の下まで持っていって離す
+        self.canvas._on_press(self._make_event(10, 10))
+        self.canvas._on_drag(self._make_event(10, 250))  # canvas 末尾より下
+        self.canvas._on_release(self._make_event(10, 250))
+        items = self.canvas.items()
+        # A が末尾に動く
+        self.assertEqual([it.label for it in items], ["B", "C", "A"])
+        self.assertEqual(len(self._items_seen), 1)
+
+    def test_reorder_no_move_no_callback(self) -> None:
+        # body をクリックして同じ位置でリリース
+        self.canvas._on_press(self._make_event(10, 10))
+        self.canvas._on_release(self._make_event(10, 10))
+        self.assertEqual(self._items_seen, [])
 
 
 def tearDownModule() -> None:

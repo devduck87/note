@@ -68,6 +68,7 @@ class MarkdownRenderer:
         base_dir: str | Path | None = None,
         readonly: bool = True,
         on_task_toggle: Callable[[int], None] | None = None,
+        on_timebox_change: "Callable[[int, int, str, list], None] | None" = None,
     ) -> None:
         self._text = text
         self._on_link_click = on_link_click
@@ -77,12 +78,14 @@ class MarkdownRenderer:
         self._base_dir = Path(base_dir) if base_dir else None
         self._readonly = readonly
         self._on_task_toggle = on_task_toggle
+        self._on_timebox_change = on_timebox_change
 
         self._link_tags: list[str] = []
         self._task_tags: list[str] = []
         self._link_counter = 0
         self._task_counter = 0
         self._images: list[tk.PhotoImage] = []
+        self._embedded_widgets: list[tk.Widget] = []
         self._configure_tags()
 
     # ------------------------------------------------------------
@@ -103,9 +106,15 @@ class MarkdownRenderer:
                 text.tag_delete(tag)
             except tk.TclError:
                 pass
+        for w in self._embedded_widgets:
+            try:
+                w.destroy()
+            except tk.TclError:
+                pass
         self._link_tags.clear()
         self._task_tags.clear()
         self._images.clear()
+        self._embedded_widgets.clear()
         self._link_counter = 0
         self._task_counter = 0
 
@@ -253,6 +262,12 @@ class MarkdownRenderer:
                 content, block_id = _strip_block_id(ul.group(1))
                 tb = _TIMEBOX_RE.match(content)
                 if tb:
+                    # 連続するタイムボックス行を集約 (Canvas に埋め込む)
+                    consumed = self._render_timebox_group(lines, i)
+                    if consumed > 0:
+                        i += consumed
+                        continue
+                    # 集約に失敗した場合は単一行のフォールバック描画
                     self._render_timebox(
                         tb.group(1), tb.group(2), tb.group(3), int(tb.group(4)), block_id
                     )
@@ -374,7 +389,7 @@ class MarkdownRenderer:
         minutes: int,
         block_id: str | None,
     ) -> None:
-        """タイムボックス書式の行を矩形カードとして描画する。"""
+        """単一行フォールバック: タイムボックス書式の行を矩形カードとして描画する。"""
         text = self._text
         start = text.index("end-1c")
         # 時刻 (太字 + 青)
@@ -389,6 +404,60 @@ class MarkdownRenderer:
         if block_id:
             end = text.index("end-1c")
             text.tag_add(f"anchor:{block_id}", start, end)
+
+    def _render_timebox_group(self, lines: list[str], start_idx: int) -> int:
+        """`start_idx` から連続するタイムボックス行を集約して Canvas を埋め込む。
+
+        消費した行数を返す。0 を返した場合は呼び出し側でフォールバック描画する。
+        """
+        from ..planning.timebox_format import TimeboxItem
+        from .timebox_canvas import TimeboxCanvas
+
+        items: list[TimeboxItem] = []
+        first_start: str | None = None
+        end_idx = start_idx
+        n = len(lines)
+        i = start_idx
+        while i < n:
+            ln = lines[i]
+            ul = _UL_RE.match(ln)
+            if not ul:
+                break
+            content, _bid = _strip_block_id(ul.group(1))
+            tb = _TIMEBOX_RE.match(content)
+            if not tb:
+                break
+            if first_start is None:
+                first_start = tb.group(1)
+            items.append(TimeboxItem(label=tb.group(3), duration_min=int(tb.group(4))))
+            end_idx = i
+            i += 1
+
+        if not items or first_start is None:
+            return 0
+
+        text = self._text
+        # ブロックの前に空行 1 つ (見やすさのため)
+        text.insert("end", "\n")
+
+        canvas = TimeboxCanvas(
+            text,
+            items=items,
+            start_time=first_start,
+            on_change=lambda new_items, s=start_idx, e=end_idx, st=first_start: self._dispatch_timebox_change(
+                s, e, st, new_items
+            ),
+        )
+        text.window_create("end", window=canvas, align="top")
+        text.insert("end", "\n\n")
+        self._embedded_widgets.append(canvas)
+        return end_idx - start_idx + 1
+
+    def _dispatch_timebox_change(
+        self, start_line: int, end_line: int, start_time: str, items: list
+    ) -> None:
+        if self._on_timebox_change is not None:
+            self._on_timebox_change(start_line, end_line, start_time, items)
 
     def _handle_task_click(self, source_line: int) -> None:
         if self._on_task_toggle is not None:

@@ -17,9 +17,27 @@ from ..markdown.md_index import slugify_heading
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$")
 _HR_RE = re.compile(r"^(\-{3,}|\*{3,}|_{3,})$")
-_TASK_RE = re.compile(r"^\s*[-*+]\s+\[([ xX])\]\s+(.*)$")
-_UL_RE = re.compile(r"^\s*[-*+]\s+(.+)$")
-_OL_RE = re.compile(r"^\s*\d+\.\s+(.+)$")
+_TASK_RE = re.compile(r"^(\s*)[-*+]\s+\[([ xX])\]\s+(.*)$")
+_UL_RE = re.compile(r"^(\s*)[-*+]\s+(.+)$")
+_OL_RE = re.compile(r"^(\s*)\d+\.\s+(.+)$")
+_MAX_INDENT_LEVEL = 6
+
+
+def _indent_level(prefix: str) -> int:
+    """先頭空白から階層レベルを推定する。
+
+    タブ 1 つ = 1 レベル。スペース 2 つ = 1 レベル (Markdown 慣習)。
+    上限は `_MAX_INDENT_LEVEL`。
+    """
+    units = 0.0
+    for ch in prefix:
+        if ch == "\t":
+            units += 1.0
+        elif ch == " ":
+            units += 0.5
+        else:
+            break
+    return min(int(units), _MAX_INDENT_LEVEL)
 _IMAGE_RE = re.compile(r"^!\[([^\]]*)\]\(([^)]+)\)")
 _LINK_RE = re.compile(r"^\[([^\]]+)\]\(([^)]+)\)")
 _NOTE_ID_IN_URL_RE = re.compile(r"(?:^|/)([^/]+)/index\.md$", re.IGNORECASE)
@@ -176,10 +194,18 @@ class MarkdownRenderer:
             spacing3=4,
         )
         text.tag_configure("hr", justify="center", foreground="#888888")
-        text.tag_configure(
-            "list_item", lmargin1=12, lmargin2=28, spacing3=2
-        )
+        text.tag_configure("list_item", spacing3=2)
         text.tag_configure("list_marker", foreground="#666666")
+        # 階層インデント用 (タスク・通常リスト・番号付きリスト共通)
+        _LMARGIN_BASE_1 = 12
+        _LMARGIN_BASE_2 = 28
+        _INDENT_STEP = 20
+        for _level in range(_MAX_INDENT_LEVEL + 1):
+            text.tag_configure(
+                f"list_indent_{_level}",
+                lmargin1=_LMARGIN_BASE_1 + _level * _INDENT_STEP,
+                lmargin2=_LMARGIN_BASE_2 + _level * _INDENT_STEP,
+            )
 
         text.tag_configure("link", foreground="#0050d0", underline=True)
         text.tag_configure(
@@ -251,15 +277,19 @@ class MarkdownRenderer:
 
             t = _TASK_RE.match(line)
             if t:
-                checked = t.group(1).lower() == "x"
-                content, block_id = _strip_block_id(t.group(2))
-                self._render_task_item(checked, content, block_id, source_line=i)
+                indent = _indent_level(t.group(1))
+                checked = t.group(2).lower() == "x"
+                content, block_id = _strip_block_id(t.group(3))
+                self._render_task_item(
+                    checked, content, block_id, source_line=i, indent=indent
+                )
                 i += 1
                 continue
 
             ul = _UL_RE.match(line)
             if ul:
-                content, block_id = _strip_block_id(ul.group(1))
+                indent = _indent_level(ul.group(1))
+                content, block_id = _strip_block_id(ul.group(2))
                 tb = _TIMEBOX_RE.match(content)
                 if tb:
                     # 連続するタイムボックス行を集約 (Canvas に埋め込む)
@@ -272,16 +302,17 @@ class MarkdownRenderer:
                         tb.group(1), tb.group(2), tb.group(3), int(tb.group(4)), block_id
                     )
                 else:
-                    self._render_list_item("• ", content, block_id)
+                    self._render_list_item("• ", content, block_id, indent=indent)
                 i += 1
                 continue
 
             ol = _OL_RE.match(line)
             if ol:
-                content, block_id = _strip_block_id(ol.group(1))
+                indent = _indent_level(ol.group(1))
+                content, block_id = _strip_block_id(ol.group(2))
                 # 番号は元のリテラルを保持
                 marker = line.lstrip()[: line.lstrip().find(".") + 2]
-                self._render_list_item(marker, content, block_id)
+                self._render_list_item(marker, content, block_id, indent=indent)
                 i += 1
                 continue
 
@@ -328,12 +359,19 @@ class MarkdownRenderer:
             self._text.tag_add(anchor_tag, start, end)
 
     def _render_list_item(
-        self, marker: str, content: str, block_id: str | None
+        self,
+        marker: str,
+        content: str,
+        block_id: str | None,
+        *,
+        indent: int = 0,
     ) -> None:
+        indent_tag = self._indent_tag(indent)
+        base_tags: tuple[str, ...] = ("list_item", indent_tag)
         start = self._text.index("end-1c")
-        self._insert_text(marker, ("list_item", "list_marker"))
-        self._render_inline(content, base_tags=("list_item",))
-        self._insert_text("\n", ("list_item",))
+        self._insert_text(marker, base_tags + ("list_marker",))
+        self._render_inline(content, base_tags=base_tags)
+        self._insert_text("\n", base_tags)
         if block_id:
             end = self._text.index("end-1c")
             self._text.tag_add(f"anchor:{block_id}", start, end)
@@ -345,11 +383,14 @@ class MarkdownRenderer:
         block_id: str | None,
         *,
         source_line: int,
+        indent: int = 0,
     ) -> None:
         """タスク行を描画する。`on_task_toggle` 設定時はマーカーをクリック可能にする。"""
+        indent_tag = self._indent_tag(indent)
+        base_tags: tuple[str, ...] = ("list_item", indent_tag)
         start = self._text.index("end-1c")
         marker = "☑ " if checked else "☐ "
-        marker_tags: tuple[str, ...] = ("list_item", "list_marker")
+        marker_tags: tuple[str, ...] = base_tags + ("list_marker",)
         if self._on_task_toggle is not None:
             self._task_counter += 1
             tag = f"task_{self._task_counter}"
@@ -369,11 +410,16 @@ class MarkdownRenderer:
             )
             marker_tags = marker_tags + (tag,)
         self._insert_text(marker, marker_tags)
-        self._render_inline(content, base_tags=("list_item",))
-        self._insert_text("\n", ("list_item",))
+        self._render_inline(content, base_tags=base_tags)
+        self._insert_text("\n", base_tags)
         if block_id:
             end = self._text.index("end-1c")
             self._text.tag_add(f"anchor:{block_id}", start, end)
+
+    def _indent_tag(self, indent: int) -> str:
+        """`indent` レベルに対応する `list_indent_<n>` タグ名を返す。"""
+        n = max(0, min(indent, _MAX_INDENT_LEVEL))
+        return f"list_indent_{n}"
 
     def _set_cursor(self, cursor: str) -> None:
         try:
@@ -423,7 +469,7 @@ class MarkdownRenderer:
             ul = _UL_RE.match(ln)
             if not ul:
                 break
-            content, _bid = _strip_block_id(ul.group(1))
+            content, _bid = _strip_block_id(ul.group(2))
             tb = _TIMEBOX_RE.match(content)
             if not tb:
                 break

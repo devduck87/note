@@ -142,6 +142,46 @@ class TimeboxRenderTests(unittest.TestCase):
 
 
 @unittest.skipUnless(_ROOT_AVAILABLE, "Tk root unavailable")
+class IndentTagTests(unittest.TestCase):
+    """インデント付きリスト/タスクが list_indent_<n> タグを取得することを確認する。"""
+
+    def setUp(self) -> None:
+        from notebase.ui.md_preview import MarkdownRenderer
+
+        self.text = tk.Text(_root)
+        self.renderer = MarkdownRenderer(self.text, readonly=False)
+
+    def tearDown(self) -> None:
+        self.text.destroy()
+
+    def test_top_level_uses_indent_0(self) -> None:
+        self.renderer.render("- top item")
+        self.assertTrue(self.text.tag_ranges("list_indent_0"))
+        self.assertEqual(self.text.tag_ranges("list_indent_1"), ())
+
+    def test_two_space_indent_uses_level_1(self) -> None:
+        self.renderer.render("- parent\n  - child")
+        self.assertTrue(self.text.tag_ranges("list_indent_0"))
+        self.assertTrue(self.text.tag_ranges("list_indent_1"))
+
+    def test_four_space_indent_uses_level_2(self) -> None:
+        self.renderer.render("- a\n  - b\n    - c")
+        self.assertTrue(self.text.tag_ranges("list_indent_2"))
+
+    def test_task_inherits_indent(self) -> None:
+        body = "- [ ] parent\n  - [ ] child A\n  - [x] child B"
+        self.renderer.render(body)
+        self.assertTrue(self.text.tag_ranges("list_indent_0"))
+        self.assertTrue(self.text.tag_ranges("list_indent_1"))
+
+    def test_ordered_list_indent(self) -> None:
+        self.renderer.render("1. first\n   2. nested")
+        # 3 スペース = 1 レベル (整数化で 1)
+        self.assertTrue(self.text.tag_ranges("list_indent_0"))
+        self.assertTrue(self.text.tag_ranges("list_indent_1"))
+
+
+@unittest.skipUnless(_ROOT_AVAILABLE, "Tk root unavailable")
 class TaskClickableTests(unittest.TestCase):
     def setUp(self) -> None:
         from notebase.ui.md_preview import MarkdownRenderer

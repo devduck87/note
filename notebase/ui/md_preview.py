@@ -24,6 +24,10 @@ _IMAGE_RE = re.compile(r"^!\[([^\]]*)\]\(([^)]+)\)")
 _LINK_RE = re.compile(r"^\[([^\]]+)\]\(([^)]+)\)")
 _NOTE_ID_IN_URL_RE = re.compile(r"(?:^|/)([^/]+)/index\.md$", re.IGNORECASE)
 _BLOCK_ID_TAIL_RE = re.compile(r"\s+\^([a-zA-Z0-9-]+)\s*$")
+# タイムボックス行の書式: HH:MM–HH:MM <label> (Nm)  (en dash または hyphen を許容)
+_TIMEBOX_RE = re.compile(
+    r"^(\d{1,2}:\d{2})\s*[\-–]\s*(\d{1,2}:\d{2})\s+(.+?)\s+\((\d+)m\)\s*$"
+)
 
 
 @dataclass
@@ -63,6 +67,7 @@ class MarkdownRenderer:
         title_resolver: Callable[[str], str | None] | None = None,
         base_dir: str | Path | None = None,
         readonly: bool = True,
+        on_task_toggle: Callable[[int], None] | None = None,
     ) -> None:
         self._text = text
         self._on_link_click = on_link_click
@@ -71,9 +76,12 @@ class MarkdownRenderer:
         self._title_resolver = title_resolver
         self._base_dir = Path(base_dir) if base_dir else None
         self._readonly = readonly
+        self._on_task_toggle = on_task_toggle
 
         self._link_tags: list[str] = []
+        self._task_tags: list[str] = []
         self._link_counter = 0
+        self._task_counter = 0
         self._images: list[tk.PhotoImage] = []
         self._configure_tags()
 
@@ -90,9 +98,16 @@ class MarkdownRenderer:
                 text.tag_delete(tag)
             except tk.TclError:
                 pass
+        for tag in self._task_tags:
+            try:
+                text.tag_delete(tag)
+            except tk.TclError:
+                pass
         self._link_tags.clear()
+        self._task_tags.clear()
         self._images.clear()
         self._link_counter = 0
+        self._task_counter = 0
 
         text.config(state="normal")
         text.delete("1.0", "end")
@@ -163,6 +178,26 @@ class MarkdownRenderer:
         )
         text.tag_configure("image_placeholder", foreground="#666666")
 
+        # タイムボックス: 長方形の箱として視覚化
+        text.tag_configure(
+            "timebox",
+            background="#e8f4ff",
+            relief="solid",
+            borderwidth=1,
+            lmargin1=12,
+            lmargin2=88,
+            spacing1=3,
+            spacing3=3,
+        )
+        text.tag_configure(
+            "timebox_time",
+            font=("Consolas", 10, "bold"),
+            foreground="#0050a0",
+        )
+        text.tag_configure(
+            "timebox_min", font=("Consolas", 9), foreground="#666666"
+        )
+
     # ------------------------------------------------------------
     # block-level
     # ------------------------------------------------------------
@@ -209,15 +244,20 @@ class MarkdownRenderer:
             if t:
                 checked = t.group(1).lower() == "x"
                 content, block_id = _strip_block_id(t.group(2))
-                marker = "☑ " if checked else "☐ "
-                self._render_list_item(marker, content, block_id)
+                self._render_task_item(checked, content, block_id, source_line=i)
                 i += 1
                 continue
 
             ul = _UL_RE.match(line)
             if ul:
                 content, block_id = _strip_block_id(ul.group(1))
-                self._render_list_item("• ", content, block_id)
+                tb = _TIMEBOX_RE.match(content)
+                if tb:
+                    self._render_timebox(
+                        tb.group(1), tb.group(2), tb.group(3), int(tb.group(4)), block_id
+                    )
+                else:
+                    self._render_list_item("• ", content, block_id)
                 i += 1
                 continue
 
@@ -282,6 +322,77 @@ class MarkdownRenderer:
         if block_id:
             end = self._text.index("end-1c")
             self._text.tag_add(f"anchor:{block_id}", start, end)
+
+    def _render_task_item(
+        self,
+        checked: bool,
+        content: str,
+        block_id: str | None,
+        *,
+        source_line: int,
+    ) -> None:
+        """タスク行を描画する。`on_task_toggle` 設定時はマーカーをクリック可能にする。"""
+        start = self._text.index("end-1c")
+        marker = "☑ " if checked else "☐ "
+        marker_tags: tuple[str, ...] = ("list_item", "list_marker")
+        if self._on_task_toggle is not None:
+            self._task_counter += 1
+            tag = f"task_{self._task_counter}"
+            self._task_tags.append(tag)
+            text = self._text
+            text.tag_configure(tag, foreground="#0050d0")
+            text.tag_bind(
+                tag, "<Enter>", lambda e: self._set_cursor("hand2")
+            )
+            text.tag_bind(
+                tag, "<Leave>", lambda e: self._set_cursor("")
+            )
+            text.tag_bind(
+                tag,
+                "<Button-1>",
+                lambda e, line=source_line: self._handle_task_click(line),
+            )
+            marker_tags = marker_tags + (tag,)
+        self._insert_text(marker, marker_tags)
+        self._render_inline(content, base_tags=("list_item",))
+        self._insert_text("\n", ("list_item",))
+        if block_id:
+            end = self._text.index("end-1c")
+            self._text.tag_add(f"anchor:{block_id}", start, end)
+
+    def _set_cursor(self, cursor: str) -> None:
+        try:
+            self._text.config(cursor=cursor)
+        except tk.TclError:
+            pass
+
+    def _render_timebox(
+        self,
+        time_start: str,
+        time_end: str,
+        label: str,
+        minutes: int,
+        block_id: str | None,
+    ) -> None:
+        """タイムボックス書式の行を矩形カードとして描画する。"""
+        text = self._text
+        start = text.index("end-1c")
+        # 時刻 (太字 + 青)
+        self._insert_text(
+            f" {time_start} – {time_end}  ", ("timebox", "timebox_time")
+        )
+        # ラベル (インライン要素を解決)
+        self._render_inline(label, base_tags=("timebox",))
+        # 所要分 (薄字)
+        self._insert_text(f"  ({minutes}m) ", ("timebox", "timebox_min"))
+        self._insert_text("\n", ("timebox",))
+        if block_id:
+            end = text.index("end-1c")
+            text.tag_add(f"anchor:{block_id}", start, end)
+
+    def _handle_task_click(self, source_line: int) -> None:
+        if self._on_task_toggle is not None:
+            self._on_task_toggle(source_line)
 
     def _render_paragraph(
         self, para_lines: list[str], block_id: str | None

@@ -83,6 +83,90 @@ class MarkdownRendererTests(unittest.TestCase):
         self.assertTrue(self.text.tag_ranges("anchor:abc123"))
 
 
+@unittest.skipUnless(_ROOT_AVAILABLE, "Tk root unavailable")
+class TimeboxRenderTests(unittest.TestCase):
+    def setUp(self) -> None:
+        from notebase.ui.md_preview import MarkdownRenderer
+
+        self.text = tk.Text(_root)
+        self.renderer = MarkdownRenderer(self.text, readonly=False)
+
+    def tearDown(self) -> None:
+        self.text.destroy()
+
+    def test_timebox_line_gets_timebox_tag(self) -> None:
+        self.renderer.render("- 09:00–09:15 朝のルーティン (15m)")
+        self.assertTrue(self.text.tag_ranges("timebox"))
+
+    def test_timebox_time_tag_applied(self) -> None:
+        self.renderer.render("- 09:00–09:15 朝のルーティン (15m)")
+        self.assertTrue(self.text.tag_ranges("timebox_time"))
+        self.assertTrue(self.text.tag_ranges("timebox_min"))
+
+    def test_normal_list_item_has_no_timebox_tag(self) -> None:
+        self.renderer.render("- ふつうのリスト項目")
+        self.assertEqual(self.text.tag_ranges("timebox"), ())
+
+    def test_timebox_with_hyphen_separator(self) -> None:
+        self.renderer.render("- 09:00-09:30 タスク (30m)")
+        self.assertTrue(self.text.tag_ranges("timebox"))
+
+    def test_short_form_timebox(self) -> None:
+        self.renderer.render("- 9:00–9:30 早朝 (30m)")
+        self.assertTrue(self.text.tag_ranges("timebox"))
+
+    def test_full_section_renders(self) -> None:
+        body = (
+            "## タイムボックス\n\n"
+            "- 09:00–09:15 朝のルーティン (15m)\n"
+            "- 09:15–10:15 仕様書レビュー (60m)\n"
+            "- 10:15–10:45 テスト追加 (30m)\n"
+        )
+        self.renderer.render(body)
+        content = self.text.get("1.0", "end-1c")
+        self.assertIn("09:00 – 09:15", content)
+        self.assertIn("09:15 – 10:15", content)
+        self.assertIn("10:15 – 10:45", content)
+        self.assertIn("(15m)", content)
+        self.assertIn("(60m)", content)
+        self.assertIn("(30m)", content)
+
+
+@unittest.skipUnless(_ROOT_AVAILABLE, "Tk root unavailable")
+class TaskClickableTests(unittest.TestCase):
+    def setUp(self) -> None:
+        from notebase.ui.md_preview import MarkdownRenderer
+
+        self._renderer_cls = MarkdownRenderer
+        self.text = tk.Text(_root)
+        self.toggled: list[int] = []
+        self.renderer = MarkdownRenderer(
+            self.text,
+            readonly=False,
+            on_task_toggle=lambda line: self.toggled.append(line),
+        )
+
+    def tearDown(self) -> None:
+        self.text.destroy()
+
+    def test_task_creates_clickable_tag(self) -> None:
+        self.renderer.render("- [ ] task A")
+        self.assertEqual(len(self.renderer._task_tags), 1)
+
+    def test_task_click_invokes_callback(self) -> None:
+        body = "- [ ] task A\n- [x] task B"
+        self.renderer.render(body)
+        self.assertEqual(len(self.renderer._task_tags), 2)
+        self.renderer._handle_task_click(0)
+        self.renderer._handle_task_click(1)
+        self.assertEqual(self.toggled, [0, 1])
+
+    def test_no_callback_means_no_task_tag(self) -> None:
+        renderer = self._renderer_cls(self.text, readonly=False)
+        renderer.render("- [ ] x")
+        self.assertEqual(renderer._task_tags, [])
+
+
 def tearDownModule() -> None:
     if _root is not None:
         try:

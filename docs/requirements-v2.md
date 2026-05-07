@@ -23,16 +23,50 @@ Markdown単体で情報を管理する場合、以下の課題がある。
 
 ### 1.3 v1 からの主な設計変更
 
-| 項目 | v1 | v2 |
-| --- | --- | --- |
-| メタデータ保存形式 | Markdown Frontmatter | `meta.json`（独立ファイル） |
-| `notes/` フォルダ階層 | type 別サブフォルダ | フラット |
-| ノート保存形式 | フォルダ方式 + 単体 .md 併用 | フォルダ方式に統一 |
-| Todo 種別 | `todo` 一種 | `todo` / `routine` / `checklist` / `log` に分割 |
-| キャンバス保存先 | `outputs/canvas/` | `canvases/`（正本扱い） |
-| Obsidian 互換出力 | 未定義 | `outputs/exports/obsidian/` に新規追加 |
-| GUI 技術 | 未決 | .NET Framework 4.6.1 / C# / WinForms に確定 |
-| 依存方針 | 未決 | **標準ライブラリのみ使用**（NuGet 不使用） |
+| 項目 | v1 | v2 | v3 (現行) |
+| --- | --- | --- | --- |
+| メタデータ保存形式 | Markdown Frontmatter | `meta.json` | (v2 同) |
+| `notes/` フォルダ階層 | type 別サブフォルダ | フラット | (v2 同) |
+| ノート保存形式 | フォルダ方式 + 単体 .md 併用 | フォルダ方式に統一 | (v2 同) |
+| Todo 種別 | `todo` 一種 | `todo` / `routine` / `checklist` / `log` 分割 | (v2 同) |
+| キャンバス保存先 | `outputs/canvas/` | `canvases/` | (v2 同・未実装) |
+| Obsidian 互換出力 | 未定義 | `outputs/exports/obsidian/` | (v2 同・未実装) |
+| GUI 技術 | 未決 | .NET 4.6.1 / C# / WinForms | **Python 3.12+ / Tkinter** |
+| Markdown プレビュー | 未決 | WebBrowser + Markdig (HTML) | **Tk Text にタグ直接描画** |
+| クリップボード画像 | 未決 | System.Drawing | **Win32 API + ctypes、DIB→PNG 自前エンコード** |
+| ファイル DnD | 未決 | WinForms DnD | **OLE IDropTarget を ctypes COM で実装** |
+| 依存方針 | 未決 | .NET 標準ライブラリのみ | **Python 標準ライブラリのみ** (NuGet/PyPI 不使用) |
+
+データ層（`MemoRoot/` 配下のフォルダ構造、`meta.json` のスキーマとバイト表現）は v2 と完全互換。v2 で書かれたデータは v3 でそのまま読み書きできる。
+
+### 1.4 実装状況サマリ (2026-05 時点)
+
+| 機能 | 状態 |
+| --- | --- |
+| ノート作成 / 一覧 / プレビュー / 編集 (CRUD) | ✅ 実装済 |
+| `meta.json` + `index.md` のアトミック保存 | ✅ 実装済 |
+| Ctrl+V クリップボード画像貼付 | ✅ 実装済 (Win32 DIB → PNG) |
+| ファイル DnD (Explorer 等から) | ✅ 実装済 (OLE IDropTarget) |
+| 「画像を追加…」ボタン (DnD のフォールバック) | ✅ 実装済 |
+| タイトル部分一致検索 / タグ部分一致検索 | ✅ 実装済 (逐次走査) |
+| 種別フィルタ / 本文検索 | ⚠️ 未実装 |
+| プロパティパネル (meta.json 編集 GUI) | ✅ 実装済 (編集ウィンドウ内に統合) |
+| 一覧ソート切替 | ⚠️ 既定 (更新降順) のみ |
+| Wiki リンク `[[Title]]` / `[[Title#anchor]]` / `[[Title\|alias]]` | ✅ 実装済 (Phase 5 相当を先取り) |
+| ブロック ID `^id` 自動付与 / アンカー遷移 | ✅ 実装済 |
+| ホバーでプレビューポップアップ | ✅ 実装済 |
+| ノート間ナビゲーション (戻るスタック) | ✅ 実装済 |
+| ノートピッカー (Ctrl+L で他ノートのブロックを参照挿入) | ✅ 実装済 |
+| 行内メタ記法 (`@date` / `#tag`) のタスク抽出 | ⚠️ 未実装 (Markdown 上では許容、index 化なし) |
+| `type=todo` のタスク抽出・進捗集計 | ⚠️ 未実装 |
+| `type=routine` のスケジュール解釈・日次 Todo 生成 | ⚠️ 未実装 |
+| `type=checklist` の実施記録インスタンス生成 | ⚠️ 未実装 |
+| 条件抽出 Markdown 出力 | ⚠️ 未実装 |
+| Obsidian 互換エクスポート | ⚠️ 未実装 |
+| キャンバス表示 | ⚠️ 未実装 |
+| JSON インデックス / SQLite | ⚠️ 未実装 (毎回 `notes/*/meta.json` を逐次走査) |
+| 外部編集検知 (`index.md` の OS mtime 監視) | ⚠️ 未実装 |
+| ゴミ箱保持期間ポリシー | ⚠️ 未実装 (削除は trash 行きまでで止まる) |
 
 ---
 
@@ -73,7 +107,7 @@ Markdown単体で情報を管理する場合、以下の課題がある。
 * 入力 UI と検索・編集 UI は分離する
 * 出力ファイルは正本と分けて管理する
 * 生成物は元データと混在させない
-* **外部 NuGet パッケージに依存せず、.NET Framework 標準ライブラリのみで実装する**
+* **外部パッケージに依存せず、Python 標準ライブラリのみで実装する** (PyPI / pip 経由のサードパーティ依存は持たない)
 
 ---
 
@@ -376,7 +410,11 @@ notes/20260428-090000-excel-tool-usage/
 
 #### 7.2.4 対応形式
 
-PNG / JPEG / JPG / GIF / BMP / WebP
+| 用途 | 形式 |
+| --- | --- |
+| 保存 (取り込み) | PNG / JPEG / JPG / GIF / BMP / WebP |
+| プレビュー上のインライン表示 | **PNG / GIF のみ** (Tk PhotoImage の制約)。それ以外は `[image: <ファイル名>]` プレースホルダで代替 |
+| クリップボード画像のソース DIB | 24bpp BI_RGB / 32bpp BI_RGB / 32bpp BI_BITFIELDS (BITMAPV5HEADER)。8bpp 以下のパレット形式や RLE は未対応 |
 
 ### 7.3 ノート一覧表示機能
 
@@ -409,10 +447,20 @@ SQLite + 全文検索（FTS5）
 
 #### 7.5.1 要件
 
-* Markdig で HTML 化し WebView2 で表示
-* 相対パス画像を解決
-* 編集モードと切替可能
-* GFM タスクリストのチェックボックスを表示
+* **Tk Text ウィジェット** に自前パーサで直接描画する (HTML/WebView は使わない)
+* 見出し・段落・リスト・タスクリスト・コードフェンス・強調・斜体・インラインコード・リンク・画像・水平線・ブロック ID をサポート
+* 相対パス画像を解決し、PNG/GIF はインライン表示、それ以外はプレースホルダ
+* 編集ウィンドウ (モーダル) で編集モードへ切替
+* GFM タスクリストは `☐` / `☑` 文字で表示
+* リンクは `tag_bind` でクリック・ホバーをコールバックする (ノート遷移・ホバープレビュー)
+
+#### 7.5.2 Wiki リンクとアンカー (Phase 5 相当の先取り)
+
+`[[Title]]`、`[[Title#anchor]]`、`[[Title|alias]]`、`[[#anchor]]`、`[[Title#^block-id]]` を解釈する。`anchor` は見出しスラグまたはブロック ID。タイトル解決はメインウィンドウの `title -> id` インデックスで行う。
+
+#### 7.5.3 ホバープレビュー
+
+リンク上 500ms 滞在で小型の `Toplevel` プレビューを表示する。`#anchor` 付きならアンカーで該当セクションのみを切り出して表示。離脱から 100ms 経過で閉じる。プレビュー内のリンクはクリック無効。
 
 ### 7.6 Markdown 編集機能
 
@@ -428,15 +476,16 @@ SQLite + 全文検索（FTS5）
 
 #### 7.7.1 概要
 
-ビューワー画面の右サイドバーで `meta.json` のフィールドを GUI 編集する。
+メインウィンドウの右上にプロパティパネル (読み取り専用) を表示し、編集は編集ウィンドウ (モーダル) 内のフォームで行う。
 
 #### 7.7.2 要件
 
-* title / type / status / tags / project / due / schedule を GUI フォームで編集
+* title / type / status / tags / project / due を GUI フォームで編集
+* schedule / instance_of の編集 UI は未実装 (データモデルとしてはサポート済み)
 * JSON 直接編集の UI は提供しない
-* 編集時に `meta.json` をアトミック更新
+* 保存時に `meta.json` をアトミック更新
 * title 変更時は `index.md` 先頭 H1 を同期
-* type 変更時は schedule / instance_of の有効性を検証
+* type 変更時の schedule / instance_of 整合性検証は未実装
 
 ### 7.8 Todo 管理機能 (type=todo)
 
@@ -844,26 +893,33 @@ CREATE TABLE canvas_edges (
 
 #### 11.2.2 要件
 
-* 検索欄
-* ノート一覧
-* 選択ノートのプレビュー / 編集ペイン
-* 右サイドバー: プロパティパネル（meta.json 編集）
-* タグ・種別フィルタ（Phase 2 以降）
-* 編集モードへの切替
+* 検索欄 (タイトル / タグ部分一致、Phase 1 で実装)
+* ノート一覧 (Treeview)
+* 選択ノートのプレビュー (右下、Tk Text)
+* 右上: プロパティパネル (読み取り専用表示。編集は編集ウィンドウへ)
+* タグ・種別フィルタ (Phase 2 以降、未実装)
+* 戻るスタック / Wiki リンクからのノート遷移 / ホバープレビュー (Phase 5 相当を先取り実装)
+* 編集モードへの切替 (Ctrl+E でモーダル編集ウィンドウを開く方式)
 
-#### 11.2.3 画面イメージ
+#### 11.2.3 画面イメージ (現実装)
 
 ```text
-┌────────────────────────────────────────────────┐
-│ 検索: [ LVGL              ] [検索]              │
-├───────────────┬──────────────────┬─────────────┤
-│ 検索結果一覧    │ プレビュー / 編集   │ プロパティ   │
-│               │                  │             │
-│ □ LVGLメモ     │ # LVGL バッファ... │ type: memo  │
-│ □ GUI手順書    │ ![](images/...)   │ tags: [..]  │
-│ □ Todo        │                   │ status: ... │
-└───────────────┴──────────────────┴─────────────┘
+┌──────────────────────────────────────────────────────┐
+│ ◀戻る  検索:[ LVGL          ]  新規  編集  ゴミ箱     │
+├──────────────────┬───────────────────────────────────┤
+│  ノート一覧      │ プロパティ (読み取り専用)           │
+│ (タイトル/種別/  │ title / type / status / tags /    │
+│  更新日時)       │ project / due / created / updated │
+│                  ├───────────────────────────────────┤
+│ □ LVGLメモ      │ プレビュー                         │
+│ □ GUI手順書     │ # LVGL バッファ...                 │
+│ □ Todo         │ ![](images/...)                    │
+│                 │ (Tk Text にタグ描画。リンクはクリック・│
+│                 │  ホバーでポップアップ)              │
+└──────────────────┴───────────────────────────────────┘
 ```
+
+編集は Ctrl+E または「編集」ボタンでモーダルの編集ウィンドウを開き、本文 + 各メタフィールドを同一画面でフォーム編集する。
 
 ---
 
@@ -955,51 +1011,59 @@ images/ をコピー
 
 ## 13. 優先度
 
-### 13.1 Phase 1: 最小実用版（MVP）
+### 13.1 Phase 1: 最小実用版（MVP） ✅ 実装済
 
-* ノート作成
-* type 選択
-* ノートフォルダ作成
+* ノート作成 / type 選択 / ノートフォルダ作成
 * `meta.json` + `index.md` のアトミック保存
 * Ctrl + V 画像貼り付け
-* ドラッグ＆ドロップ画像貼り付け
-* ノート一覧表示
-* タイトル部分一致検索
-* Markdown プレビュー（Markdig + WebView2）
+* ファイル DnD による画像貼り付け
+* ノート一覧表示 / タイトル部分一致検索
+* Markdown プレビュー（自前パーサ + Tk Text タグ描画）
 
-### 13.2 Phase 2: 検索・編集強化版
+### 13.2 Phase 2: 検索・編集強化版 ⚠️ 部分実装
 
-* タグ検索 / 種別フィルタ
+実装済:
+* Markdown 編集モード (モーダル編集ウィンドウ)
+* プロパティパネル (編集ウィンドウ内に統合)
+* タイトル / タグ部分一致検索
+
+未実装:
+* 種別フィルタ
 * 本文検索
-* Markdown 編集モード
-* プロパティパネル（meta.json 編集）
 * 一覧ソート切替
-* JSON インデックス
-* 外部編集検知
+* JSON インデックス (今は走査毎にメタ load)
+* 外部編集検知 (`index.md` の OS mtime 監視)
 
-### 13.3 Phase 3: Todo・Routine 版
+### 13.3 Phase 3: Todo・Routine 版 ⏸ 未着手
 
-* 行内メタ記法解析
+* 行内メタ記法解析 (`@date` / `#tag`)
 * タスク抽出
-* routine 管理（schedule 編集）
-* checklist インスタンス生成
-* 日次 Todo 生成
+* routine 管理 (schedule 編集 UI)
+* checklist インスタンス生成 (「実施を開始」操作)
+* 日次 Todo 生成 (`outputs/daily_todo/`)
 
-### 13.4 Phase 4: エクスポート・抽出版
+データモデル (`type=todo` / `routine` / `checklist` / `log`、`schedule`、`instance_of`) はサポート済 (load/save/serialize 可)。動作機能は未実装。
 
-* JSON インデックス完成版（タグ・タスク・添付）
+### 13.4 Phase 4: エクスポート・抽出版 ⏸ 未着手
+
+* JSON インデックス完成版 (タグ・タスク・添付)
 * インデックス再構築機能
 * Obsidian 互換エクスポート
 * 条件抽出 Markdown 出力
-* SQLite 導入は標準ライブラリ縛り解除を判断した時点で別フェーズとして検討
+* SQLite 導入は Python 標準ライブラリ縛り解除を判断した時点で別フェーズとして検討
 
-### 13.5 Phase 5: 高度整理版
+### 13.5 Phase 5: 高度整理版 (一部先取り済)
 
-* キャンバス表示
-* ノート間関連線
-* 全文検索（標準実装。FTS5 は SQLite 導入時に再検討）
-* テンプレート編集機能
-* ノート間 wiki link
+実装済:
+* ノート間 wiki link `[[Title]]` / アンカー指定 / エイリアス / ブロック ID
+* リンクホバーでのプレビュー表示
+* リンクピッカーによるブロック単位の参照挿入 (Ctrl+L)
+* ノート間ナビゲーション (戻るスタック)
+
+未実装:
+* キャンバス表示 / ノート間関連線
+* 全文検索
+* テンプレート編集 UI
 
 ---
 
@@ -1034,59 +1098,94 @@ images/ をコピー
 
 ### 15.1 依存方針
 
-**標準ライブラリのみを使用する。** NuGet パッケージ・外部 DLL に依存しない。
+**Python 標準ライブラリのみを使用する。** PyPI / pip 経由のサードパーティパッケージ (Pillow / markdown / tkdnd など) には依存しない。
 
 理由:
 
-* 配布が単純（exe 1 つ + 設定ファイル）
+* 配布が単純 (`python -m notebase` で動く。venv 1 つで完結)
 * 長期保守でのライブラリ陳腐化リスクを排除
 * 本システムの規模では標準ライブラリで十分実装可能と判断
+* Windows 固有機能 (クリップボード DIB、OLE Drag&Drop) は `ctypes` 経由で Win32 API を直接叩く
 
 ### 15.2 採用技術
 
 | 用途 | 採用 |
 | --- | --- |
-| ターゲットフレームワーク | .NET Framework 4.6.1 |
-| GUI 基盤 | WinForms |
-| Markdown パース・HTML 変換 | **自前実装**（最低限の GFM サブセット） |
-| プレビュー描画 | **WebBrowser コントロール**（WinForms 標準、IE エンジン） |
-| JSON シリアライズ | **自前実装**（meta.json 用、人間可読インデント付き） |
-| エディタ（Phase 1） | TextBox（multiline） |
-| エディタ（Phase 2 以降） | RichTextBox 拡張または自前 |
-| SQLite | 採用しない。標準制約緩和時のみ再検討 |
+| 言語 / ランタイム | Python 3.12+ |
+| GUI 基盤 | Tkinter (`tkinter` / `tkinter.ttk` 標準モジュール) |
+| Markdown パース | **自前実装** ([notebase/markdown/to_html.py](../notebase/markdown/to_html.py)、[notebase/markdown/md_index.py](../notebase/markdown/md_index.py)) |
+| プレビュー描画 | **Tk Text ウィジェットにタグ直接描画** ([notebase/ui/md_preview.py](../notebase/ui/md_preview.py))。HTML/WebView は使わない |
+| エディタ | `tk.Text` (折り返し無し / 等幅 / undo) を `MarkdownText` でラップ |
+| JSON 入力 | `json` 標準モジュール |
+| JSON 出力 (`meta.json`) | **自前シリアライザ** (フィールド順固定 / 2 スペースインデント / null 省略 / C# 版とバイト一致) |
+| アトミック書き込み | `tempfile.mkstemp` + `os.replace` |
+| クリップボード画像取得 | `ctypes.windll.user32` で `OpenClipboard` / `GetClipboardData(CF_DIBV5/CF_DIB)` |
+| DIB → PNG エンコード | `zlib` + `struct` + `zlib.crc32` で IHDR/IDAT/IEND を手書き生成 |
+| ファイル DnD | `ctypes.WINFUNCTYPE` で `IDropTarget` の COM vtable を構築し、`OleInitialize` / `RegisterDragDrop` で Tk widget の HWND に登録 |
+| テスト | `unittest` (標準モジュール)。100 ケース、2 skip (非 Windows / レガシーデータ参照) |
+| SQLite | 採用しない (標準ライブラリ制約。`sqlite3` モジュールは存在するが、本システムは正本フォルダ走査で十分なため未採用) |
 
-### 15.3 自前 Markdown パーサーの対応範囲（Phase 1）
+### 15.3 パッケージ構成
 
-* 見出し（`#` 〜 `######`）
+```text
+notebase/
+├─ core/        ID 生成 / Enum / NoteMeta dataclass
+├─ storage/     AppPaths / AtomicWriter / MetaJson / ImageStore / TrashService / NoteRepository
+├─ markdown/    md_index (見出し・ブロック抽出) / summary / to_html
+├─ ui/          main_window / note_edit_window / note_picker_dialog / note_preview_popup / md_preview / markdown_text
+├─ platform/    clipboard_image (CF_DIB → PNG) / file_dnd (OLE IDropTarget)
+├─ migrate.py   旧 C# 版 MemoRoot からの自動コピー
+├─ __init__.py
+└─ __main__.py  起動エントリ (`python -m notebase`)
+```
+
+### 15.4 自前 Markdown パーサーの対応範囲
+
+**ブロック要素**:
+
+* 見出し (`#` 〜 `######`)
 * 段落
-* 箇条書き（`-` `*` `+`、ネスト）
-* 番号付きリスト（`1.`）
-* タスクリスト（`- [ ]` `- [x]`）
-* 強調（`**bold**` `*italic*`）
-* インラインコード（`` `code` ``）
-* コードブロック（フェンス `` ``` `` のみ）
-* 画像（`![alt](path)`）
-* リンク（`[text](url)`）
-* 水平線（`---`）
+* 箇条書き (`-` `*` `+`、ネスト)
+* 番号付きリスト (`1.`)
+* タスクリスト (`- [ ]` `- [x]`)
+* コードブロック (フェンス ` ``` ` のみ)
+* 水平線 (`---` / `***` / `___`)
 
-対象外（必要時に拡張）:
+**インライン要素**:
 
-* テーブル
-* 引用ブロック
-* HTML 直書き
-* 脚注
-* 取り消し線
+* 強調 (`**bold**`)、斜体 (`*italic*`)
+* インラインコード (`` `code` ``)
+* 画像 (`![alt](path)`)
+* リンク (`[text](url)`)
+* **Wiki リンク** (`[[Title]]` / `[[Title#anchor]]` / `[[Title|alias]]` / `[[#anchor]]` / `[[Title#^block-id]]`)
+* **ブロック ID** (行末 `^[a-zA-Z0-9-]+`)
 
-### 15.4 自前 JSON シリアライザの対応範囲
+**対象外** (必要時に拡張):
+
+* テーブル / 引用ブロック / HTML 直書き / 脚注 / 取り消し線
+
+Tk Text への描画と HTML 出力 ([notebase/markdown/to_html.py](../notebase/markdown/to_html.py)) は別実装になっているが、解釈ルールは共通。HTML 出力は内部用 (将来の Obsidian エクスポート等の基盤) で、現行 UI のプレビューには使わない。
+
+### 15.5 自前 JSON シリアライザの対応範囲 ([notebase/storage/meta_json.py](../notebase/storage/meta_json.py))
 
 `meta.json` のスキーマに特化:
 
 * プリミティブ: 文字列 / 数値 / bool / null
-* 配列: 文字列配列（`tags`、`days`）
-* オブジェクト: 1 段ネスト（`schedule`）
-* 日時: ISO8601 文字列で扱う
-* 出力: 2 スペースインデント、フィールド順固定、null フィールドは省略
-* 入力: トークナイザ + パーサーで `Dictionary<string, object>` を生成し POCO へマッピング
+* 配列: 文字列配列 (`tags`、`days`)
+* オブジェクト: 1 段ネスト (`schedule`)
+* 日時: ISO8601 文字列 (`yyyy-MM-ddTHH:mm:ss` / `yyyy-MM-dd`)
+* 出力: 2 スペースインデント、フィールド順固定、null/空値は省略 (`tags` は常に出力)
+* 入力: 標準 `json.loads` で dict に落とし、dataclass にマッピング
+* C# v2 版が書いた既存 `meta.json` を読み → 書き戻したらバイト完全一致することをテストで保証
+
+### 15.6 Windows 固有機能の実装メモ
+
+| 機能 | 実装ファイル | 概要 |
+| --- | --- | --- |
+| クリップボード画像 | [clipboard_image.py](../notebase/platform/clipboard_image.py) | `OpenClipboard` → `GetClipboardData(CF_DIBV5)` → DIB ヘッダ解析 → BGR(A)/BI_BITFIELDS マスク変換 → PNG (zlib + 手書きチャンク) |
+| OLE Drag&Drop | [file_dnd.py](../notebase/platform/file_dnd.py) | `IDropTarget` vtable を `WINFUNCTYPE` で組み、`RegisterDragDrop` で Tk widget の HWND に登録。Drop で `IDataObject::GetData(CF_HDROP)` → `DragQueryFileW` でパス抽出 |
+
+非 Windows プラットフォームでは両モジュールとも no-op スタブで読み込み可能。クリップボード画像貼付と DnD だけが効かなくなり、その他の機能は動く。
 
 ---
 
@@ -1098,14 +1197,20 @@ images/ をコピー
 | `trash/` の保持期間・自動削除ポリシー | Phase 1〜2 |
 | 外部編集競合時のユーザー通知方式 | Phase 2 |
 | 一覧ソートの種類（タイトル / 種別 / 期限...） | Phase 2 |
-| ノート間相互リンク方式（`[[wiki link]]` 採用？） | Phase 5 |
 | 日本語全文検索の tokenizer | Phase 5 |
 | Obsidian エクスポート時の画像処理（コピー / シンボリックリンク） | Phase 4 |
 | 既存 routine 完了履歴の遡及表示方式（daily todo ファイル走査の最適化） | Phase 3 |
 | 自前 Markdown パーサーの GFM 互換範囲拡張（テーブル等） | Phase 2〜 |
-| WebBrowser コントロールの IE 互換モード設定（必要時のみ） | Phase 1 |
 | 標準ライブラリ縛り緩和の判断（性能要件・SQLite 必要性が顕在化したとき） | Phase 4 以降 |
 | `type=log` の細分化（自由形式ログ / 実施記録 を別 type にするか） | Phase 3 以降 |
+| Tk Text プレビューでの未対応形式 (JPEG/BMP/WebP) の取り扱い (現状はプレースホルダ。サムネイル生成や外部ビューア起動の検討) | Phase 2〜 |
+| クリップボード画像で未対応の DIB 形式 (8bpp 以下、RLE) のサポート可否 | Phase 2〜 |
+
+**決着済み** (Phase 5 等で予定していたが先取り実装):
+
+* ノート間相互リンク方式 → `[[Title]]` / `[[Title#anchor]]` / `[[Title|alias]]` / `[[Title#^block-id]]` を採用 (実装済)
+* リンクのホバープレビュー / アンカー遷移 / ブロック ID 自動付与 (実装済)
+* WebBrowser コントロールの IE 互換モード問題 → Tk Text 直接描画に切り替えたため不要
 
 ---
 

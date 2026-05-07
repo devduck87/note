@@ -1,4 +1,4 @@
-"""NotePreviewPopup の位置計算が画面端ではみ出さないことを検証する (純粋関数)。"""
+"""NotePreviewPopup の位置計算が画面/作業領域端ではみ出さないことを検証する。"""
 
 from __future__ import annotations
 
@@ -8,45 +8,55 @@ from notebase.ui.note_preview_popup import flip_position
 
 
 class FlipPositionTests(unittest.TestCase):
-    SW = 1920
-    SH = 1080
     PW = 480
     PH = 320
+    # work_area: タスクバーが下 40px にあるとして残りが作業領域
+    WA_FULL = (0, 0, 1920, 1080)
+    WA_TASKBAR = (0, 0, 1920, 1040)
 
     def test_default_offset_when_far_from_edges(self) -> None:
-        x, y = flip_position(100, 100, self.PW, self.PH, self.SW, self.SH)
+        x, y = flip_position(100, 100, self.PW, self.PH, work_area=self.WA_FULL)
         self.assertEqual((x, y), (116, 116))
 
     def test_flips_up_when_near_bottom(self) -> None:
-        # y_root が下端付近 → ポップアップ下端が画面外になるので上へフリップ
-        x, y = flip_position(100, self.SH - 5, self.PW, self.PH, self.SW, self.SH)
-        # 上方向にフリップされて y < y_root
-        self.assertLess(y, self.SH - 5)
-        # 下端は画面内
-        self.assertLessEqual(y + self.PH, self.SH)
+        x, y = flip_position(100, 1075, self.PW, self.PH, work_area=self.WA_FULL)
+        # フリップして y < y_root
+        self.assertLess(y, 1075)
+        # 領域内に収まる
+        self.assertLessEqual(y + self.PH, 1080)
 
     def test_flips_left_when_near_right(self) -> None:
-        x, y = flip_position(self.SW - 5, 100, self.PW, self.PH, self.SW, self.SH)
-        self.assertLess(x, self.SW - 5)
-        self.assertLessEqual(x + self.PW, self.SW)
+        x, y = flip_position(1915, 100, self.PW, self.PH, work_area=self.WA_FULL)
+        self.assertLess(x, 1915)
+        self.assertLessEqual(x + self.PW, 1920)
 
     def test_corner_case_bottom_right(self) -> None:
-        x, y = flip_position(
-            self.SW - 5, self.SH - 5, self.PW, self.PH, self.SW, self.SH
-        )
-        self.assertLessEqual(x + self.PW, self.SW)
-        self.assertLessEqual(y + self.PH, self.SH)
+        x, y = flip_position(1915, 1075, self.PW, self.PH, work_area=self.WA_FULL)
+        self.assertLessEqual(x + self.PW, 1920)
+        self.assertLessEqual(y + self.PH, 1080)
         self.assertGreaterEqual(x, 0)
         self.assertGreaterEqual(y, 0)
 
-    def test_popup_larger_than_screen_clamps_to_zero(self) -> None:
-        # ポップアップが画面より大きい (異常ケース) でも負座標にしない
-        x, y = flip_position(50, 50, 3000, 2000, 1920, 1080)
+    def test_excludes_taskbar(self) -> None:
+        # 下端付近: 全画面ではフリップ不要に見えても、タスクバー除外領域では必要
+        # y_root=1010 でポップアップ高 320 → 1010+16+320 = 1346 が limit を超える
+        x, y = flip_position(100, 1010, self.PW, self.PH, work_area=self.WA_TASKBAR)
+        self.assertLessEqual(y + self.PH, 1040, "タスクバー領域に重ならないこと")
+
+    def test_taskbar_does_not_affect_when_above(self) -> None:
+        # 上の方では taskbar 設定でも挙動変わらず
+        x, y = flip_position(200, 200, self.PW, self.PH, work_area=self.WA_TASKBAR)
+        self.assertEqual((x, y), (216, 216))
+
+    def test_popup_larger_than_screen_clamps(self) -> None:
+        x, y = flip_position(50, 50, 3000, 2000, work_area=self.WA_FULL)
         self.assertGreaterEqual(x, 0)
         self.assertGreaterEqual(y, 0)
 
     def test_custom_margin(self) -> None:
-        x, y = flip_position(100, 100, 100, 100, 1920, 1080, margin=8)
+        x, y = flip_position(
+            100, 100, 100, 100, work_area=self.WA_FULL, margin=8
+        )
         self.assertEqual((x, y), (108, 108))
 
 

@@ -7,6 +7,7 @@ C# 版 NotePreviewPopup 相当。リンク上に 500ms 滞在で表示し、
 
 from __future__ import annotations
 
+import sys
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
@@ -19,6 +20,36 @@ _HOVER_SHOW_DELAY_MS = 500
 _HOVER_HIDE_DELAY_MS = 100
 _POPUP_WIDTH = 60   # in chars
 _POPUP_HEIGHT = 16  # in lines
+
+
+def _get_work_area(screen_w: int, screen_h: int) -> tuple[int, int, int, int]:
+    """画面の作業領域 (left, top, right, bottom) を返す。
+
+    Windows ではタスクバーを除く領域を `SystemParametersInfoW` で取得する。
+    取得に失敗した場合は (0, 0, screen_w, screen_h) を返す。
+    """
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class _RECT(ctypes.Structure):
+                _fields_ = [
+                    ("left", wintypes.LONG),
+                    ("top", wintypes.LONG),
+                    ("right", wintypes.LONG),
+                    ("bottom", wintypes.LONG),
+                ]
+
+            SPI_GETWORKAREA = 0x0030
+            rect = _RECT()
+            if ctypes.windll.user32.SystemParametersInfoW(
+                SPI_GETWORKAREA, 0, ctypes.byref(rect), 0
+            ):
+                return (rect.left, rect.top, rect.right, rect.bottom)
+        except (OSError, AttributeError):
+            pass
+    return (0, 0, screen_w, screen_h)
 
 
 class NotePreviewPopup:
@@ -140,7 +171,8 @@ class NotePreviewPopup:
             sh = self._top.winfo_screenheight()
         except tk.TclError:
             return (x_root + 16, y_root + 16)
-        return flip_position(x_root, y_root, pw, ph, sw, sh)
+        work = _get_work_area(sw, sh)
+        return flip_position(x_root, y_root, pw, ph, work_area=work)
 
 
 def flip_position(
@@ -148,21 +180,26 @@ def flip_position(
     y_root: int,
     popup_w: int,
     popup_h: int,
-    screen_w: int,
-    screen_h: int,
+    *,
+    work_area: tuple[int, int, int, int],
     margin: int = 16,
 ) -> tuple[int, int]:
     """ポップアップの最終位置を決める純粋関数。
 
-    既定はカーソル右下 +16px。右端や下端をはみ出す場合は反対側へフリップ。
-    画面より大きいポップアップでも 0 未満には行かないようクランプ。
+    `work_area` は (left, top, right, bottom) の作業領域 (Windows ならタスクバー除外)。
+    既定はカーソル右下 +16px。作業領域からはみ出す場合は反対側へフリップ。
+    領域より大きいポップアップでも領域内にクランプ。
     """
+    left, top, right, bottom = work_area
     x = x_root + margin
     y = y_root + margin
-    if x + popup_w > screen_w:
-        x = max(0, x_root - popup_w - margin)
-    if y + popup_h > screen_h:
-        y = max(0, y_root - popup_h - margin)
+    if x + popup_w > right:
+        x = x_root - popup_w - margin
+    if y + popup_h > bottom:
+        y = y_root - popup_h - margin
+    # 領域上端/左端より上/左には行かない
+    x = max(left, x)
+    y = max(top, y)
     return (x, y)
 
     def _build_popup(self) -> None:

@@ -140,6 +140,41 @@ class TimeboxRenderTests(unittest.TestCase):
             ["朝のルーティン", "仕様書レビュー", "テスト追加"],
         )
 
+    def test_child_lines_attach_to_previous_item(self) -> None:
+        body = (
+            "- 09:00–09:15 朝のルーティン (15m)\n"
+            "  - 詳細: ストレッチとコーヒー\n"
+            "  - 実績: 25m\n"
+            "  - 遅延理由: 寝坊した\n"
+            "- 09:15–09:45 レビュー (30m)\n"
+            "  - 詳細: PR #42\n"
+        )
+        self.renderer.render(body)
+        canvases = self._embedded_canvases()
+        self.assertEqual(len(canvases), 1)
+        items = canvases[0].items()
+        self.assertEqual(len(items), 2)
+        self.assertEqual(items[0].detail, "ストレッチとコーヒー")
+        self.assertEqual(items[0].actual_min, 25)
+        self.assertEqual(items[0].reason, "寝坊した")
+        self.assertEqual(items[1].detail, "PR #42")
+        self.assertIsNone(items[1].actual_min)
+        self.assertEqual(items[1].reason, "")
+
+    def test_unknown_child_line_terminates_block(self) -> None:
+        body = (
+            "- 09:00–09:15 朝 (15m)\n"
+            "  - 詳細: メモ\n"
+            "  - その他のリスト\n"
+            "- 09:15–09:30 これは別ブロック (15m)\n"
+        )
+        self.renderer.render(body)
+        canvases = self._embedded_canvases()
+        # 認識できない子行で集約が打ち切られるので 2 つの Canvas に分割される
+        self.assertEqual(len(canvases), 2)
+        self.assertEqual(canvases[0].items()[0].detail, "メモ")
+        self.assertEqual(canvases[1].items()[0].label, "これは別ブロック")
+
 
 @unittest.skipUnless(_ROOT_AVAILABLE, "Tk root unavailable")
 class IndentTagTests(unittest.TestCase):

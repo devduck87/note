@@ -57,6 +57,48 @@ class RenderTimeboxLinesTests(unittest.TestCase):
         lines = render_timebox_lines([TimeboxItem("x", 30)], "bad")
         self.assertEqual(lines, ["- 09:00–09:30 x (30m)"])
 
+    def test_omits_child_lines_when_unset(self) -> None:
+        # detail / actual_min / reason がデフォルトのままなら子行は出さない
+        lines = render_timebox_lines([TimeboxItem("x", 30)], "09:00")
+        self.assertEqual(lines, ["- 09:00–09:30 x (30m)"])
+
+    def test_emits_child_lines_when_set(self) -> None:
+        items = [
+            TimeboxItem(
+                "朝のルーティン",
+                15,
+                detail="ストレッチとコーヒー",
+                actual_min=20,
+                reason="寝坊した",
+            ),
+            TimeboxItem("レビュー", 30, detail="PR #42"),
+        ]
+        lines = render_timebox_lines(items, "09:00")
+        self.assertEqual(
+            lines,
+            [
+                "- 09:00–09:15 朝のルーティン (15m)",
+                "  - 詳細: ストレッチとコーヒー",
+                "  - 実績: 20m",
+                "  - 遅延理由: 寝坊した",
+                "- 09:15–09:45 レビュー (30m)",
+                "  - 詳細: PR #42",
+            ],
+        )
+
+    def test_actual_zero_emits(self) -> None:
+        # actual_min が 0 でも (None ではない) 子行は出す
+        lines = render_timebox_lines(
+            [TimeboxItem("x", 30, actual_min=0)], "09:00"
+        )
+        self.assertEqual(
+            lines,
+            [
+                "- 09:00–09:30 x (30m)",
+                "  - 実績: 0m",
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

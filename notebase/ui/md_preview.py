@@ -46,6 +46,11 @@ _BLOCK_ID_TAIL_RE = re.compile(r"\s+\^([a-zA-Z0-9-]+)\s*$")
 _TIMEBOX_RE = re.compile(
     r"^(\d{1,2}:\d{2})\s*[\-–]\s*(\d{1,2}:\d{2})\s+(.+?)\s+\((\d+)m\)\s*$"
 )
+# タイムボックス親行の直下にぶら下がる子行 (詳細 / 実績 / 遅延理由)。
+# インデントされた `- key: value` 形式で書く。
+_TB_DETAIL_RE = re.compile(r"^詳細[:：]\s*(.+?)\s*$")
+_TB_ACTUAL_RE = re.compile(r"^実績[:：]\s*(\d+)\s*m?\s*$")
+_TB_REASON_RE = re.compile(r"^遅延理由[:：]\s*(.+?)\s*$")
 
 
 @dataclass
@@ -454,6 +459,10 @@ class MarkdownRenderer:
     def _render_timebox_group(self, lines: list[str], start_idx: int) -> int:
         """`start_idx` から連続するタイムボックス行を集約して Canvas を埋め込む。
 
+        親行 (`- HH:MM–HH:MM ... (Nm)`) を順番に拾いつつ、その直下に
+        インデントされた子行 (`  - 詳細: ...` / `  - 実績: Nm` /
+        `  - 遅延理由: ...`) があれば直前のアイテムに紐付ける。
+
         消費した行数を返す。0 を返した場合は呼び出し側でフォールバック描画する。
         """
         from ..planning.timebox_format import TimeboxItem
@@ -469,15 +478,48 @@ class MarkdownRenderer:
             ul = _UL_RE.match(ln)
             if not ul:
                 break
+            indent = _indent_level(ul.group(1))
             content, _bid = _strip_block_id(ul.group(2))
-            tb = _TIMEBOX_RE.match(content)
-            if not tb:
+
+            if indent == 0:
+                tb = _TIMEBOX_RE.match(content)
+                if not tb:
+                    break
+                if first_start is None:
+                    first_start = tb.group(1)
+                items.append(
+                    TimeboxItem(label=tb.group(3), duration_min=int(tb.group(4)))
+                )
+                end_idx = i
+                i += 1
+                continue
+
+            # インデント有り: 直前アイテムへの付随情報
+            if not items:
                 break
-            if first_start is None:
-                first_start = tb.group(1)
-            items.append(TimeboxItem(label=tb.group(3), duration_min=int(tb.group(4))))
-            end_idx = i
-            i += 1
+            current = items[-1]
+            md = _TB_DETAIL_RE.match(content)
+            if md:
+                current.detail = md.group(1)
+                end_idx = i
+                i += 1
+                continue
+            ma = _TB_ACTUAL_RE.match(content)
+            if ma:
+                try:
+                    current.actual_min = int(ma.group(1))
+                except ValueError:
+                    pass
+                end_idx = i
+                i += 1
+                continue
+            mr = _TB_REASON_RE.match(content)
+            if mr:
+                current.reason = mr.group(1)
+                end_idx = i
+                i += 1
+                continue
+            break  # 認識できない子行はブロックの終端扱い
 
         if not items or first_start is None:
             return 0

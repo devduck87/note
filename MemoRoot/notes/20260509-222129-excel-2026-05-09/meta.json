@@ -1,0 +1,11 @@
+{
+  "meta_version": 1,
+  "id": "20260509-222129-excel-2026-05-09",
+  "title": "Excel検索ツールの使い方 2026-05-09",
+  "type": "log",
+  "status": "active",
+  "tags": ["excel", "search", "tool"],
+  "instance_of": "20260420-090000-excel-tool-usage",
+  "created": "2026-05-09T22:21:29",
+  "updated": "2026-05-09T22:21:45"
+}

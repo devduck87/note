@@ -1,0 +1,15 @@
+{
+  "meta_version": 1,
+  "id": "20260509-230500-monthly-maintenance",
+  "title": "月次メンテナンスルーティーン",
+  "type": "routine",
+  "status": "active",
+  "tags": ["routine", "monthly"],
+  "schedule": {
+    "frequency": "monthly",
+    "day_of_month": 1,
+    "enabled": true
+  },
+  "created": "2026-05-09T23:05:00",
+  "updated": "2026-05-09T23:05:00"
+}

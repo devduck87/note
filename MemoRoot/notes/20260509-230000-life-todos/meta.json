@@ -1,0 +1,10 @@
+{
+  "meta_version": 1,
+  "id": "20260509-230000-life-todos",
+  "title": "生活 Todo",
+  "type": "todo",
+  "status": "active",
+  "tags": ["life", "personal"],
+  "created": "2026-05-09T23:00:00",
+  "updated": "2026-05-09T23:00:00"
+}

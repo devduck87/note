@@ -26,6 +26,7 @@ def _toggle_task_line(line: str) -> str | None:
 
 from ..core.note_meta import NoteMeta
 from ..core.note_type import NoteType
+from ..core.note_type_config import get_config, load_configs
 from ..markdown.summary import extract as extract_summary
 from ..storage.app_paths import AppPaths
 from ..storage.note_repository import NoteRepository
@@ -43,6 +44,7 @@ class MainWindow:
         paths.ensure_layout()
         self._trash = TrashService(paths)
         self._repo = NoteRepository(paths, self._trash)
+        self._type_configs = load_configs(paths.note_types_config)
 
         self._all_metas: list[NoteMeta] = []
         self._current_id: str | None = None
@@ -300,7 +302,7 @@ class MainWindow:
         self._prop_updated.config(
             text=meta.updated.strftime("%Y-%m-%d %H:%M")
         )
-        if meta.type in (NoteType.PROCEDURE, NoteType.CHECKLIST):
+        if meta.type == NoteType.PROCEDURE:
             self._start_instance_btn.state(["!disabled"])
         else:
             self._start_instance_btn.state(["disabled"])
@@ -442,12 +444,26 @@ class MainWindow:
     # ------------------------------------------------------------
 
     def _on_new(self) -> None:
-        note_type = choose_note_type(self._root)
-        if note_type is None:
+        result = choose_note_type(self._root)
+        if result is None:
             return
-        meta = self._repo.create_draft(note_type)
-        # ドラフトは title 空。エディタ起動。
-        win = NoteEditWindow(self._root, self._repo, meta, "", is_new=True)
+        if isinstance(result, tuple):
+            note_type, schedule = result
+        else:
+            note_type, schedule = result, None
+        config = get_config(self._type_configs, note_type)
+        meta = self._repo.create_draft(
+            note_type, schedule=schedule, config=config
+        )
+        # ドラフトは title 空、本文は config の body_template から開始。
+        win = NoteEditWindow(
+            self._root,
+            self._repo,
+            meta,
+            config.body_template,
+            is_new=True,
+            type_configs=self._type_configs,
+        )
         saved = win.show()
         if saved is not None:
             self._reload_notes(select_id=saved.id)
@@ -462,7 +478,10 @@ class MainWindow:
                 "読み込みエラー", f"{self._current_id}: {exc}", parent=self._root
             )
             return
-        win = NoteEditWindow(self._root, self._repo, meta, body, is_new=False)
+        win = NoteEditWindow(
+            self._root, self._repo, meta, body, is_new=False,
+            type_configs=self._type_configs,
+        )
         saved = win.show()
         if saved is not None:
             self._current_id = None
@@ -491,7 +510,7 @@ class MainWindow:
                 "読み込みエラー", f"{self._current_id}: {exc}", parent=self._root
             )
             return
-        if template_meta.type not in (NoteType.PROCEDURE, NoteType.CHECKLIST):
+        if template_meta.type != NoteType.PROCEDURE:
             return
         try:
             meta, body = self._repo.create_instance(self._current_id)
@@ -500,7 +519,10 @@ class MainWindow:
                 "実施記録の作成に失敗", str(exc), parent=self._root
             )
             return
-        win = NoteEditWindow(self._root, self._repo, meta, body, is_new=True)
+        win = NoteEditWindow(
+            self._root, self._repo, meta, body, is_new=True,
+            type_configs=self._type_configs,
+        )
         saved = win.show()
         if saved is not None:
             self._current_id = None

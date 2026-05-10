@@ -38,6 +38,10 @@ class AppPaths:
     def config(self) -> Path:
         return self.root / "config"
 
+    @property
+    def note_types_config(self) -> Path:
+        return self.config / "note_types.json"
+
     def note_dir(self, note_id: str) -> Path:
         return self.notes / note_id
 

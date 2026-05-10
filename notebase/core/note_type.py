@@ -8,7 +8,6 @@ class NoteType(Enum):
     MEMO = "memo"
     TODO = "todo"
     ROUTINE = "routine"
-    CHECKLIST = "checklist"
     LOG = "log"
     DAILY = "daily"
     PROJECT = "project"
@@ -20,6 +19,8 @@ class NoteType(Enum):
     def parse(cls, s: str | None) -> "NoteType":
         if s is None:
             return cls.MEMO
+        if s == "checklist":
+            return cls.PROCEDURE
         for t in cls:
             if t.value == s:
                 return t
@@ -32,10 +33,9 @@ class NoteType(Enum):
 _DISPLAY_NAMES: dict[NoteType, str] = {
     NoteType.PROCEDURE: "手順書",
     NoteType.MEMO: "備忘録",
-    NoteType.TODO: "Todo",
-    NoteType.ROUTINE: "ルーティーン",
-    NoteType.CHECKLIST: "チェックリスト",
-    NoteType.LOG: "ログ",
+    NoteType.TODO: "やるべきこと",
+    NoteType.ROUTINE: "やるべきこと (周期)",
+    NoteType.LOG: "タスクログ",
     NoteType.DAILY: "日次メモ",
     NoteType.PROJECT: "プロジェクト",
 }

@@ -34,6 +34,10 @@ def serialize(m: NoteMeta) -> str:
         lines.append(_schedule_field("schedule", m.schedule))
     if m.instance_of:
         lines.append(_string_field("instance_of", m.instance_of))
+    if m.estimated_minutes is not None:
+        lines.append(_int_field("estimated_minutes", m.estimated_minutes))
+    if m.actual_minutes is not None:
+        lines.append(_int_field("actual_minutes", m.actual_minutes))
     lines.append(_string_field("created", _format_datetime(m.created)))
     lines.append(_string_field("updated", _format_datetime(m.updated)))
 
@@ -68,6 +72,16 @@ def _meta_from_dict(d: dict) -> NoteMeta:
         m.schedule = _schedule_from_dict(d["schedule"])
     if "instance_of" in d:
         m.instance_of = d["instance_of"]
+    if "estimated_minutes" in d and d["estimated_minutes"] is not None:
+        try:
+            m.estimated_minutes = int(d["estimated_minutes"])
+        except (TypeError, ValueError):
+            m.estimated_minutes = None
+    if "actual_minutes" in d and d["actual_minutes"] is not None:
+        try:
+            m.actual_minutes = int(d["actual_minutes"])
+        except (TypeError, ValueError):
+            m.actual_minutes = None
     if "created" in d and isinstance(d["created"], str):
         m.created = _parse_datetime(d["created"])
     if "updated" in d and isinstance(d["updated"], str):

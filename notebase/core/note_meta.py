@@ -22,5 +22,7 @@ class NoteMeta:
     due: datetime | None = None
     schedule: Schedule | None = None
     instance_of: str | None = None
+    estimated_minutes: int | None = None
+    actual_minutes: int | None = None
     created: datetime = field(default_factory=lambda: datetime(1, 1, 1))
     updated: datetime = field(default_factory=lambda: datetime(1, 1, 1))

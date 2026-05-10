@@ -47,17 +47,10 @@ class CreateInstanceTests(unittest.TestCase):
             # 本文の続きは保持
             self.assertIn("1. ファイルを選択する", body)
 
-    def test_checklist_template_works_too(self) -> None:
-        with TemporaryDirectory() as td:
-            repo = _make_repo(td)
-            tmpl = repo.create_draft(NoteType.CHECKLIST)
-            tmpl.title = "リリースチェック"
-            saved_tmpl = repo.save_new(tmpl, "- [ ] バックアップ取得\n- [ ] テスト実行\n")
-
-            meta, body = repo.create_instance(saved_tmpl.id)
-            self.assertEqual(meta.type, NoteType.LOG)
-            self.assertEqual(meta.instance_of, saved_tmpl.id)
-            self.assertIn("- [ ] バックアップ取得", body)
+    def test_legacy_checklist_type_falls_back_to_procedure(self) -> None:
+        # 旧 NoteType.CHECKLIST は廃止済み。meta.json に "type": "checklist"
+        # が残っていても PROCEDURE として読み込めること。
+        self.assertEqual(NoteType.parse("checklist"), NoteType.PROCEDURE)
 
     def test_save_new_persists_instance(self) -> None:
         with TemporaryDirectory() as td:

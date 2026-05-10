@@ -1,0 +1,30 @@
+{
+  "memo": {
+    "fields": ["status", "tags", "project"],
+    "defaults": { "status": "active" },
+    "body_template": ""
+  },
+  "procedure": {
+    "fields": ["status", "tags", "project"],
+    "defaults": { "status": "active" },
+    "body_template": "## 手順\n\n1. \n"
+  },
+  "todo": {
+    "fields": ["status", "tags", "project", "due"],
+    "defaults": { "status": "active" },
+    "body_template": "- [ ] \n"
+  },
+  "routine": {
+    "fields": ["status", "tags", "schedule"],
+    "defaults": {
+      "status": "active",
+      "schedule": { "frequency": "weekly", "enabled": true }
+    },
+    "body_template": "- [ ] \n"
+  },
+  "log": {
+    "fields": ["status", "tags", "project", "estimated_minutes", "actual_minutes"],
+    "defaults": { "status": "active" },
+    "body_template": "## 詳細\n\n## 作業メモ\n\n## 振り返り\n"
+  }
+}

@@ -11,6 +11,8 @@ from ..core import note_id as note_id_mod
 from ..core.note_meta import NoteMeta
 from ..core.note_status import NoteStatus
 from ..core.note_type import NoteType
+from ..core.note_type_config import NoteTypeConfig
+from ..core.schedule import Schedule
 from . import meta_json
 from .app_paths import AppPaths
 from .atomic_writer import write_text_atomic
@@ -39,8 +41,20 @@ class NoteRepository:
     # CRUD
     # ------------------------------------------------------------
 
-    def create_draft(self, note_type: NoteType) -> NoteMeta:
+    def create_draft(
+        self,
+        note_type: NoteType,
+        *,
+        schedule: Schedule | None = None,
+        config: NoteTypeConfig | None = None,
+    ) -> NoteMeta:
         """入力 UI で type 選択時に呼ばれる。仮 ID でフォルダを作成する。
+
+        `config` が渡された場合、`config.defaults` の内容で初期 status / tags /
+        schedule を埋める。引数 `schedule` は config の default schedule より優先
+        (UI 側のサブ選択ダイアログで明示指定された値を尊重するため)。
+        本文テンプレートは戻り値に含めない — 呼び出し元が `config.body_template`
+        を直接 NoteEditWindow に渡す想定。
 
         確定保存時 (save_new) でタイトルから slug を再計算してフォルダ名を rename する。
         """
@@ -51,12 +65,22 @@ class NoteRepository:
         self._paths.note_dir(nid).mkdir(parents=True, exist_ok=True)
         self._paths.images_dir(nid).mkdir(parents=True, exist_ok=True)
 
+        if config is not None:
+            status = config.default_status() or NoteStatus.ACTIVE
+            tags = config.default_tags()
+            effective_schedule = schedule or config.default_schedule()
+        else:
+            status = NoteStatus.ACTIVE
+            tags = []
+            effective_schedule = schedule
+
         return NoteMeta(
             id=nid,
             title="",
             type=note_type,
-            status=NoteStatus.ACTIVE,
-            tags=[],
+            status=status,
+            tags=tags,
+            schedule=effective_schedule,
             created=now,
             updated=now,
         )
@@ -117,7 +141,7 @@ class NoteRepository:
     # ------------------------------------------------------------
 
     def create_instance(self, template_id: str) -> tuple[NoteMeta, str]:
-        """`type=procedure` / `type=checklist` テンプレートから実施記録 (type=log) のドラフトを作る。
+        """`type=procedure` テンプレートから実施記録 (type=log) のドラフトを作る。
 
         - 新規 ID とフォルダを作成 (空の images/ 含む)
         - meta は `type=log`、`instance_of=template_id`、tags はテンプレからコピー
